@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSR Strategic Hub - Pro</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
+            authDomain: "csr-dashboard-5e613.firebaseapp.com",
+            projectId: "csr-dashboard-5e613",
+            storageBucket: "csr-dashboard-5e613.firebasestorage.app",
+            messagingSenderId: "662684708122",
+            appId: "1:662684708122:web:6e17a3bd8e31ff18be10a3",
+            measurementId: "G-HQV1X5DELN"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let userProfile = JSON.parse(localStorage.getItem('csr_user_profile')) || null;
+        let initiatives = [];
+        let charts = { doughnut: null };
+
+        async function initAuth() {
+            onAuthStateChanged(auth, (user) => {
+                if (user && userProfile) { showDashboard(); } 
+                else { showLogin(); }
+            });
+        }
+
+        window.handleLogin = async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('login-name').value;
+            const role = document.getElementById('login-role').value;
+            try {
+                await signInAnonymously(auth);
+                userProfile = { name, role };
+                localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
+                showDashboard();
+            } catch (error) { alert("Errore connessione database"); }
+        };
+
+        function showLogin() {
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('main-dashboard').classList.add('hidden');
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('main-dashboard').classList.remove('hidden');
+            document.getElementById('user-name-display').innerText = userProfile.name;
+            setupRealtimeSync();
+        }
+
+        function setupRealtimeSync() {
+            const q = query(collection(db, 'iniziative'), orderBy('timestamp', 'desc'));
+            onSnapshot(q, (snapshot) => {
+                initiatives = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                updateUI();
+            });
+        }
+
+        window.saveInitiative = async (e) => {
+            e.preventDefault();
+            const payload = {
+                nome_iniziativa: document.getElementById('nome_iniziativa').value,
+                categoria: document.getElementById('categoria').value,
+                descrizione: document.getElementById('descrizione').value,
+                kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
+                kpi_unita: document.getElementById('kpi_unita').value,
+                autore: userProfile.name,
+                timestamp: serverTimestamp()
+            };
+            await addDoc(collection(db, 'iniziative'), payload);
+            e.target.reset();
+        };
+
+        function updateUI() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = initiatives.map(item => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                    <td class="p-4"><strong>${item.nome_iniziativa}</strong><br><span class="text-[10px] text-slate-400">${item.autore}</span></td>
+                    <td class="p-4"><span class="px-2 py-1 rounded text-[10px] bg-emerald-100 text-emerald-700 font-bold">${item.categoria}</span></td>
+                    <td class="p-4 text-sm text-slate-600">${item.descrizione}</td>
+                    <td class="p-4 text-right font-bold text-emerald-600">${item.kpi_valore} ${item.kpi_unita}</td>
+                </tr>
+            `).join('');
+
+            const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
+            const ctx = document.getElementById('chart-doughnut').getContext('2d');
+            if(charts.doughnut) charts.doughnut.destroy();
+            charts.doughnut = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: ['#10b981', '#3b82f6', '#f59e0b'] }] },
+                options: { maintainAspectRatio: false }
+            });
+        }
+
+        window.logout = () => { auth.signOut(); localStorage.removeItem('csr_user_profile'); location.reload(); };
+        window.onload = initAuth;
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
+            <h2 class="text-2xl font-bold text-center mb-6">Accesso CSR Hub</h2>
+            <form onsubmit="handleLogin(event)" class="space-y-4">
+                <input type="text" id="login-name" required placeholder="Nome Completo" class="w-full px-4 py-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-500">
+                <select id="login-role" class="w-full px-4 py-3 bg-slate-50 border rounded-xl outline-none">
+                    <option>CSR Manager</option>
+                    <option>Strategist</option>
+                </select>
+                <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl hover:bg-emerald-700 transition-all">Entra</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="main-dashboard" class="hidden">
+        <nav class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10">
+            <span class="font-bold text-slate-800">🏆 CSR Strategic Hub</span>
+            <div class="flex items-center gap-4">
+                <span id="user-name-display" class="text-sm font-bold">--</span>
+                <button onclick="logout()" class="text-rose-500">Esci</button>
+            </div>
+        </nav>
+
+        <main class="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <aside class="lg:col-span-1">
+                <div class="bg-white p-6 rounded-3xl shadow-sm border">
+                    <h3 class="font-bold mb-4">Nuova Iniziativa</h3>
+                    <form onsubmit="saveInitiative(event)" class="space-y-4">
+                        <input type="text" id="nome_iniziativa" placeholder="Titolo" required class="w-full p-2 bg-slate-50 border rounded-lg text-sm">
+                        <select id="categoria" class="w-full p-2 bg-slate-50 border rounded-lg text-sm">
+                            <option>Salute e Inclusione</option>
+                            <option>Comunità e Territorio</option>
+                        </select>
+                        <textarea id="descrizione" placeholder="Descrizione" class="w-full p-2 bg-slate-50 border rounded-lg text-sm"></textarea>
+                        <div class="flex gap-2">
+                            <input type="number" id="kpi_valore" placeholder="Valore" class="w-1/2 p-2 bg-slate-50 border rounded-lg text-sm">
+                            <input type="text" id="kpi_unita" placeholder="Unità" class="w-1/2 p-2 bg-slate-50 border rounded-lg text-sm">
+                        </div>
+                        <button type="submit" class="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-bold">Registra</button>
+                    </form>
+                </div>
+            </aside>
+
+            <div class="lg:col-span-3 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-white p-4 rounded-3xl border h-64"><canvas id="chart-doughnut"></canvas></div>
+                    <div class="bg-emerald-600 p-6 rounded-3xl text-white flex items-center">
+                        <div>
+                            <h3 class="text-xl font-bold">Monitoraggio Real-time</h3>
+                            <p class="text-emerald-100 text-sm">I dati inseriti sono salvati su Firebase.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-3xl border overflow-hidden">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50 text-[10px] uppercase text-slate-400">
+                            <tr><th class="p-4">Iniziativa</th><th class="p-4">Area</th><th class="p-4">Descrizione</th><th class="p-4 text-right">Impatto</th></tr>
+                        </thead>
+                        <tbody id="table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+</body>
+</html>
