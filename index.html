@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Pro</title>
+    <title>CSR Strategic Hub - Enterprise</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -11,8 +11,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
+        // --- CONFIGURAZIONE FIREBASE ---
         const firebaseConfig = {
             apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
             authDomain: "csr-dashboard-5e613.firebaseapp.com",
@@ -29,8 +30,10 @@
 
         let userProfile = JSON.parse(localStorage.getItem('csr_user_profile')) || null;
         let initiatives = [];
-        let charts = { doughnut: null };
+        let charts = { doughnut: null, bar: null };
+        let editingId = null; // Traccia se stiamo modificando un record
 
+        // --- LOGICA AUTENTICAZIONE ---
         async function initAuth() {
             onAuthStateChanged(auth, (user) => {
                 if (user && userProfile) { showDashboard(); } 
@@ -40,14 +43,15 @@
 
         window.handleLogin = async (e) => {
             e.preventDefault();
-            const name = document.getElementById('login-name').value;
-            const role = document.getElementById('login-role').value;
             try {
                 await signInAnonymously(auth);
-                userProfile = { name, role };
+                userProfile = { 
+                    name: document.getElementById('login-name').value, 
+                    role: document.getElementById('login-role').value 
+                };
                 localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
                 showDashboard();
-            } catch (error) { alert("Errore connessione database"); }
+            } catch (error) { alert("Errore connessione"); }
         };
 
         function showLogin() {
@@ -62,6 +66,7 @@
             setupRealtimeSync();
         }
 
+        // --- GESTIONE DATI (CRUD) ---
         function setupRealtimeSync() {
             const q = query(collection(db, 'iniziative'), orderBy('timestamp', 'desc'));
             onSnapshot(q, (snapshot) => {
@@ -72,37 +77,144 @@
 
         window.saveInitiative = async (e) => {
             e.preventDefault();
+            const btn = e.target.querySelector('button');
+            btn.disabled = true;
+
             const payload = {
                 nome_iniziativa: document.getElementById('nome_iniziativa').value,
                 categoria: document.getElementById('categoria').value,
                 descrizione: document.getElementById('descrizione').value,
                 kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
-                kpi_unita: document.getElementById('kpi_unita').value,
+                kpi_unita: document.getElementById('kpi_unita').value.toLowerCase().trim(),
+                data_evento: document.getElementById('data_evento').value,
+                frequenza: document.getElementById('frequenza').value,
+                alert_attivo: document.getElementById('alert_attivo').checked,
                 autore: userProfile.name,
-                timestamp: serverTimestamp()
+                last_updated: serverTimestamp()
             };
-            await addDoc(collection(db, 'iniziative'), payload);
-            e.target.reset();
+
+            try {
+                if (editingId) {
+                    await updateDoc(doc(db, 'iniziative', editingId), payload);
+                    editingId = null;
+                    btn.innerText = "Registra Iniziativa";
+                    btn.classList.replace('bg-amber-500', 'bg-slate-900');
+                } else {
+                    payload.timestamp = serverTimestamp();
+                    await addDoc(collection(db, 'iniziative'), payload);
+                }
+                e.target.reset();
+            } catch (err) { console.error(err); }
+            btn.disabled = false;
         };
 
-        function updateUI() {
-            const tbody = document.getElementById('table-body');
-            tbody.innerHTML = initiatives.map(item => `
-                <tr class="border-b border-slate-100 hover:bg-slate-50">
-                    <td class="p-4"><strong>${item.nome_iniziativa}</strong><br><span class="text-[10px] text-slate-400">${item.autore}</span></td>
-                    <td class="p-4"><span class="px-2 py-1 rounded text-[10px] bg-emerald-100 text-emerald-700 font-bold">${item.categoria}</span></td>
-                    <td class="p-4 text-sm text-slate-600">${item.descrizione}</td>
-                    <td class="p-4 text-right font-bold text-emerald-600">${item.kpi_valore} ${item.kpi_unita}</td>
-                </tr>
-            `).join('');
+        window.deleteItem = async (id) => {
+            if(confirm("Eliminare definitivamente questa iniziativa?")) {
+                await deleteDoc(doc(db, 'iniziative', id));
+            }
+        };
 
+        window.editItem = (id) => {
+            const item = initiatives.find(i => i.id === id);
+            if(!item) return;
+            
+            editingId = id;
+            document.getElementById('nome_iniziativa').value = item.nome_iniziativa;
+            document.getElementById('categoria').value = item.categoria;
+            document.getElementById('descrizione').value = item.descrizione;
+            document.getElementById('kpi_valore').value = item.kpi_valore;
+            document.getElementById('kpi_unita').value = item.kpi_unita;
+            document.getElementById('data_evento').value = item.data_evento || '';
+            document.getElementById('frequenza').value = item.frequenza || 'singolo evento';
+            document.getElementById('alert_attivo').checked = item.alert_attivo || false;
+
+            const btn = document.querySelector('#initiative-form button');
+            btn.innerText = "Aggiorna Modifiche";
+            btn.classList.replace('bg-slate-900', 'bg-amber-500');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        // --- LOGICA ALERT SCADENZE ---
+        function getDeadlineInfo(item) {
+            if (!item.alert_attivo || !item.data_evento || item.frequenza === 'singolo evento') return null;
+
+            const dataInizio = new Date(item.data_evento);
+            const oggi = new Date();
+            let scadenza = new Date(dataInizio);
+
+            const mesi = { "mensile": 1, "trimestrale": 3, "semestrale": 6, "annuale": 12 };
+            scadenza.setMonth(scadenza.getMonth() + (mesi[item.frequenza] || 0));
+
+            const diffTempo = scadenza - oggi;
+            const diffGiorni = Math.ceil(diffTempo / (1000 * 60 * 60 * 24));
+
+            if (diffGiorni <= 60 && diffGiorni > 0) return { giorni: diffGiorni, data: scadenza.toLocaleDateString() };
+            if (diffGiorni <= 0) return { scaduto: true };
+            return null;
+        }
+
+        // --- UI & GRAFICI ---
+        function updateUI() {
+            renderTable();
+            renderDoughnutChart();
+            renderComparisonChart();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = initiatives.map(item => {
+                const alert = getDeadlineInfo(item);
+                const alertBadge = alert ? 
+                    (alert.scaduto ? `<span class="block text-[9px] text-rose-600 font-bold mt-1">⚠️ SCADUTO</span>` : 
+                    `<span class="block text-[9px] text-amber-600 font-bold mt-1">⏰ RINNOVO TRA ${alert.giorni} GG</span>`) : '';
+
+                return `
+                <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td class="p-4">
+                        <div class="font-bold text-slate-800">${item.nome_iniziativa}</div>
+                        <div class="text-[10px] text-slate-400 uppercase">Dal: ${item.data_evento || 'N/D'}</div>
+                        ${alertBadge}
+                    </td>
+                    <td class="p-4"><span class="px-2 py-1 rounded text-[10px] font-bold bg-blue-50 text-blue-600">${item.categoria}</span></td>
+                    <td class="p-4 text-[11px] text-slate-500 italic">${item.frequenza}</td>
+                    <td class="p-4 text-right font-bold text-emerald-600">${item.kpi_valore} ${item.kpi_unita}</td>
+                    <td class="p-4 text-right space-x-2">
+                        <button onclick="editItem('${item.id}')" class="text-slate-400 hover:text-amber-500 text-xs">Modifica</button>
+                        <button onclick="deleteItem('${item.id}')" class="text-slate-400 hover:text-rose-500 text-xs">Elimina</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderDoughnutChart() {
             const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
             const ctx = document.getElementById('chart-doughnut').getContext('2d');
             if(charts.doughnut) charts.doughnut.destroy();
             charts.doughnut = new Chart(ctx, {
                 type: 'doughnut',
-                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: ['#10b981', '#3b82f6', '#f59e0b'] }] },
-                options: { maintainAspectRatio: false }
+                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: ['#10b981', '#3b82f6', '#f59e0b', '#8b5cf6'], borderWidth: 0 }] },
+                options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } } }
+            });
+        }
+
+        function renderComparisonChart() {
+            // Trova l'unità più comune per fare il confronto
+            const units = initiatives.map(i => i.kpi_unita);
+            const mostCommonUnit = units.sort((a,b) => units.filter(v => v===a).length - units.filter(v => v===b).length).pop();
+            
+            const filtered = initiatives.filter(i => i.kpi_unita === mostCommonUnit);
+            const ctx = document.getElementById('chart-comparison').getContext('2d');
+            if(charts.bar) charts.bar.destroy();
+            
+            if(filtered.length < 2) return; // Non mostrare se non c'è nulla da confrontare
+
+            charts.bar = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: filtered.map(i => i.nome_iniziativa.substring(0, 10) + '..'),
+                    datasets: [{ label: `Valore (${mostCommonUnit})`, data: filtered.map(i => i.kpi_valore), backgroundColor: '#10b981', borderRadius: 8 }]
+                },
+                options: { maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
             });
         }
 
@@ -113,71 +225,120 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        input, select, textarea { transition: all 0.2s; }
+        input:focus { border-color: #10b981 !important; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1); }
     </style>
 </head>
 <body class="min-h-screen">
 
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
         <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4">
-            <h2 class="text-2xl font-bold text-center mb-6">Accesso CSR Hub</h2>
+            <h2 class="text-2xl font-bold text-center mb-6 text-slate-800">CSR Hub Login</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" required placeholder="Nome Completo" class="w-full px-4 py-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-emerald-500">
-                <select id="login-role" class="w-full px-4 py-3 bg-slate-50 border rounded-xl outline-none">
+                <input type="text" id="login-name" required placeholder="Tuo Nome" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none">
+                <select id="login-role" class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none">
                     <option>CSR Manager</option>
-                    <option>Strategist</option>
+                    <option>Analyst</option>
                 </select>
-                <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl hover:bg-emerald-700 transition-all">Entra</button>
+                <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-4 rounded-2xl hover:bg-emerald-700">Entra nel Sistema</button>
             </form>
         </div>
     </div>
 
     <div id="main-dashboard" class="hidden">
-        <nav class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10">
-            <span class="font-bold text-slate-800">🏆 CSR Strategic Hub</span>
+        <nav class="bg-white/80 backdrop-blur-md border-b p-4 flex justify-between items-center sticky top-0 z-10">
+            <div class="flex items-center gap-2">
+                <span class="text-xl">🌿</span>
+                <span class="font-bold text-slate-800 tracking-tight">CSR Strategic Hub</span>
+            </div>
             <div class="flex items-center gap-4">
-                <span id="user-name-display" class="text-sm font-bold">--</span>
-                <button onclick="logout()" class="text-rose-500">Esci</button>
+                <span id="user-name-display" class="text-xs font-bold px-3 py-1 bg-slate-100 rounded-full text-slate-600">--</span>
+                <button onclick="logout()" class="text-xs text-rose-500 font-bold uppercase tracking-widest">Logout</button>
             </div>
         </nav>
 
-        <main class="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-4 gap-6">
-            <aside class="lg:col-span-1">
-                <div class="bg-white p-6 rounded-3xl shadow-sm border">
-                    <h3 class="font-bold mb-4">Nuova Iniziativa</h3>
-                    <form onsubmit="saveInitiative(event)" class="space-y-4">
-                        <input type="text" id="nome_iniziativa" placeholder="Titolo" required class="w-full p-2 bg-slate-50 border rounded-lg text-sm">
-                        <select id="categoria" class="w-full p-2 bg-slate-50 border rounded-lg text-sm">
-                            <option>Salute e Inclusione</option>
-                            <option>Comunità e Territorio</option>
-                            <option>Educazione e Giovani</option>
-                        </select>
-                        <textarea id="descrizione" placeholder="Descrizione" class="w-full p-2 bg-slate-50 border rounded-lg text-sm"></textarea>
-                        <div class="flex gap-2">
-                            <input type="number" id="kpi_valore" placeholder="Valore" class="w-1/2 p-2 bg-slate-50 border rounded-lg text-sm">
-                            <input type="text" id="kpi_unita" placeholder="Unità" class="w-1/2 p-2 bg-slate-50 border rounded-lg text-sm">
+        <main class="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+            
+            <aside class="lg:col-span-4 space-y-6">
+                <div class="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
+                    <h3 class="font-bold text-slate-800 mb-6 flex items-center gap-2">
+                        <span class="w-2 h-6 bg-emerald-500 rounded-full"></span> 
+                        Gestione Iniziativa
+                    </h3>
+                    <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
+                        <input type="text" id="nome_iniziativa" placeholder="Nome Iniziativa" required class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                        
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="categoria" class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                                <option>Salute e Inclusione</option>
+                                <option>Comunità e Territorio</option>
+                                <option>Ambiente</option>
+                            </select>
+                            <select id="frequenza" class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                                <option value="singolo evento">Singolo Evento</option>
+                                <option value="settimanale">Settimanale</option>
+                                <option value="mensile">Mensile</option>
+                                <option value="trimestrale">Trimestrale</option>
+                                <option value="semestrale">Semestrale</option>
+                                <option value="annuale">Annuale</option>
+                            </select>
                         </div>
-                        <button type="submit" class="w-full bg-slate-900 text-white py-2 rounded-lg text-sm font-bold">Registra</button>
+
+                        <div class="space-y-1">
+                            <label class="text-[10px] font-bold text-slate-400 ml-1">DATA DI RIFERIMENTO</label>
+                            <input type="date" id="data_evento" required class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                        </div>
+
+                        <textarea id="descrizione" placeholder="Note e obiettivi..." class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm h-20"></textarea>
+                        
+                        <div class="flex gap-2">
+                            <input type="number" id="kpi_valore" placeholder="Valore" required class="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                            <input type="text" id="kpi_unita" placeholder="Unità (es: ore, €)" required class="w-1/2 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm">
+                        </div>
+
+                        <div class="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                            <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-emerald-600">
+                            <label for="alert_attivo" class="text-xs text-emerald-800 font-medium leading-tight">Attiva avviso scadenza (-2 mesi)</label>
+                        </div>
+
+                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-xl text-sm font-bold shadow-lg shadow-slate-200 active:scale-95 transition-transform">
+                            Registra Iniziativa
+                        </button>
                     </form>
                 </div>
             </aside>
 
-            <div class="lg:col-span-3 space-y-6">
+            <div class="lg:col-span-8 space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-4 rounded-3xl border h-64"><canvas id="chart-doughnut"></canvas></div>
-                    <div class="bg-emerald-600 p-6 rounded-3xl text-white flex items-center">
-                        <div>
-                            <h3 class="text-xl font-bold">Monitoraggio Real-time</h3>
-                            <p class="text-emerald-100 text-sm">I dati inseriti sono salvati su Firebase.</p>
-                        </div>
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72">
+                        <h4 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-wider">Mix Categorie</h4>
+                        <div class="relative h-48"><canvas id="chart-doughnut"></canvas></div>
+                    </div>
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72">
+                        <h4 class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-wider">Confronto KPI (Stessa Unità)</h4>
+                        <div class="relative h-48"><canvas id="chart-comparison"></canvas></div>
                     </div>
                 </div>
-                <div class="bg-white rounded-3xl border overflow-hidden">
-                    <table class="w-full text-left">
-                        <thead class="bg-slate-50 text-[10px] uppercase text-slate-400">
-                            <tr><th class="p-4">Iniziativa</th><th class="p-4">Area</th><th class="p-4">Descrizione</th><th class="p-4 text-right">Impatto</th></tr>
-                        </thead>
-                        <tbody id="table-body"></tbody>
-                    </table>
+
+                <div class="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+                    <div class="p-6 border-b border-slate-50 flex justify-between items-center">
+                        <h3 class="font-bold text-slate-800 tracking-tight">Registro Iniziative</h3>
+                        <span class="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-bold">LIVE UPDATE</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-slate-50/50 text-[10px] uppercase text-slate-400 font-bold">
+                                <tr>
+                                    <th class="p-4">Dettagli</th>
+                                    <th class="p-4">Area</th>
+                                    <th class="p-4">Frequenza</th>
+                                    <th class="p-4 text-right">Impatto</th>
+                                    <th class="p-4 text-right">Azioni</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body" class="divide-y divide-slate-50"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </main>
