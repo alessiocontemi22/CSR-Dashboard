@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Pro Evolution</title>
+    <title>CSR Strategic Hub - Final Edition</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -31,7 +31,21 @@
         let initiatives = [];
         let charts = { doughnut: null, bar: null };
         let editingId = null;
-        let currentUnitIndex = 0; // Per scorrere i grafici KPI
+        let currentUnitIndex = 0;
+
+        // --- COLORI CATEGORIE ---
+        const categoryColors = {
+            "Comunità e Ambiente": "#10b981", // Verde
+            "Educazione e Giovani": "#3b82f6", // Blu
+            "Salute e Inclusione": "#f59e0b"   // Arancione
+        };
+
+        // --- FUNZIONE FORMATO DATA gg/mm/aaaa ---
+        function formatDate(dateString) {
+            if (!dateString) return "N/D";
+            const [year, month, day] = dateString.split("-");
+            return `${day}/${month}/${year}`;
+        }
 
         async function initAuth() {
             onAuthStateChanged(auth, (user) => {
@@ -98,6 +112,7 @@
             const item = initiatives.find(i => i.id === id);
             editingId = id;
             document.getElementById('nome_iniziativa').value = item.nome_iniziativa;
+            document.getElementById('categoria').value = item.categoria;
             document.getElementById('kpi_valore').value = item.kpi_valore;
             document.getElementById('kpi_unita').value = item.kpi_unita;
             document.getElementById('data_evento').value = item.data_evento;
@@ -106,40 +121,27 @@
             document.querySelector('#initiative-form button').innerText = "Aggiorna Modifiche";
         };
 
-        // --- 1) LOGICA ALERT DIFFERENZIATA ---
         function getDeadlineInfo(item) {
             if (!item.alert_attivo || !item.data_evento || item.frequenza === 'singolo evento') return null;
-
             const dataInizio = new Date(item.data_evento);
             const oggi = new Date();
             let scadenza = new Date(dataInizio);
-
-            const config = {
-                "mensile": { mesi: 1, preavviso: 10 },
-                "trimestrale": { mesi: 3, preavviso: 20 },
-                "semestrale": { mesi: 6, preavviso: 30 },
-                "annuale": { mesi: 12, preavviso: 60 }
-            };
-
+            const config = { "mensile": { mesi: 1, pre: 10 }, "trimestrale": { mesi: 3, pre: 20 }, "semestrale": { mesi: 6, pre: 30 }, "annuale": { mesi: 12, pre: 60 } };
             const conf = config[item.frequenza];
             if (!conf) return null;
-
             scadenza.setMonth(scadenza.getMonth() + conf.mesi);
-            const diffGiorni = Math.ceil((scadenza - oggi) / (1000 * 60 * 60 * 24));
-
-            if (diffGiorni <= conf.preavviso && diffGiorni > 0) return { giorni: diffGiorni };
-            if (diffGiorni <= 0) return { scaduto: true };
+            const diff = Math.ceil((scadenza - oggi) / (1000 * 60 * 60 * 24));
+            if (diff <= conf.pre && diff > 0) return { giorni: diff };
+            if (diff <= 0) return { scaduto: true };
             return null;
         }
 
-        // --- 2) GRAFICO COMPARATIVO CON NAVIGAZIONE ---
         window.changeChart = (dir) => {
             currentUnitIndex += dir;
             renderComparisonChart();
         };
 
         function renderComparisonChart() {
-            // Raggruppa per unità
             const groups = initiatives.reduce((acc, curr) => {
                 const unit = curr.kpi_unita;
                 if (!acc[unit]) acc[unit] = [];
@@ -147,17 +149,11 @@
                 return acc;
             }, {});
 
-            // Filtra solo unità con almeno 2 iniziative
             const unitsToCompare = Object.keys(groups).filter(u => groups[u].length >= 2);
             const container = document.getElementById('comparison-nav');
-            
-            if (unitsToCompare.length === 0) {
-                container.classList.add('hidden');
-                return;
-            }
+            if (unitsToCompare.length === 0) { container.classList.add('hidden'); return; }
 
             container.classList.remove('hidden');
-            // Gestione loop indice
             if (currentUnitIndex < 0) currentUnitIndex = unitsToCompare.length - 1;
             if (currentUnitIndex >= unitsToCompare.length) currentUnitIndex = 0;
 
@@ -172,19 +168,19 @@
             charts.bar = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    // Label con Nome + Data
-                    labels: dataSet.map(i => `${i.nome_iniziativa} (${i.data_evento})`),
+                    labels: dataSet.map(i => `${i.nome_iniziativa} (${formatDate(i.data_evento)})`),
                     datasets: [{
                         label: activeUnit,
                         data: dataSet.map(i => i.kpi_valore),
-                        backgroundColor: '#10b981',
+                        // COLORE BARRA DINAMICO IN BASE ALLA CATEGORIA
+                        backgroundColor: dataSet.map(i => categoryColors[i.categoria] || '#cbd5e1'),
                         borderRadius: 6
                     }]
                 },
                 options: { 
                     maintainAspectRatio: false,
                     plugins: { legend: { display: false } },
-                    scales: { x: { ticks: { font: { size: 9 } } } }
+                    scales: { x: { ticks: { font: { size: 9 }, autoSkip: false, maxRotation: 45 } } }
                 }
             });
         }
@@ -203,11 +199,14 @@
                 const badge = alert ? (alert.scaduto ? `<span class="text-rose-600 font-bold text-[9px]">⚠️ SCADUTO</span>` : `<span class="text-amber-600 font-bold text-[9px]">⏰ -${alert.giorni} GG</span>`) : '';
                 return `
                 <tr class="border-b border-slate-50 text-sm">
-                    <td class="p-4"><strong>${item.nome_iniziativa}</strong><br><span class="text-[10px] text-slate-400">${item.data_evento}</span></td>
-                    <td class="p-4 font-medium">${item.categoria}</td>
+                    <td class="p-4"><strong>${item.nome_iniziativa}</strong><br><span class="text-[10px] text-slate-400">${formatDate(item.data_evento)}</span></td>
+                    <td class="p-4 font-medium"><span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" style="background:${categoryColors[item.categoria]}"></span>${item.categoria}</span></td>
                     <td class="p-4">${item.frequenza} ${badge}</td>
-                    <td class="p-4 text-right font-bold">${item.kpi_valore} ${item.kpi_unita}</td>
-                    <td class="p-4 text-right"><button onclick="editItem('${item.id}')" class="text-blue-500 mr-2">Mod</button><button onclick="deleteItem('${item.id}')" class="text-rose-500">Elimina</button></td>
+                    <td class="p-4 text-right font-bold text-emerald-600">${item.kpi_valore} ${item.kpi_unita}</td>
+                    <td class="p-4 text-right">
+                        <button onclick="editItem('${item.id}')" class="text-blue-500 hover:underline mr-2">Mod</button>
+                        <button onclick="deleteItem('${item.id}')" class="text-rose-500 hover:underline">Elimina</button>
+                    </td>
                 </tr>`;
             }).join('');
         }
@@ -218,19 +217,29 @@
             if(charts.doughnut) charts.doughnut.destroy();
             charts.doughnut = new Chart(ctx, {
                 type: 'doughnut',
-                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'] }] },
-                options: { maintainAspectRatio: false }
+                data: { 
+                    labels: Object.keys(stats), 
+                    datasets: [{ 
+                        data: Object.values(stats), 
+                        backgroundColor: Object.keys(stats).map(cat => categoryColors[cat] || '#cbd5e1'),
+                        borderWidth: 0
+                    }] 
+                },
+                options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } } }
             });
         }
 
-        // --- 3) FOOTER DINAMICO ---
         function updateFooter() {
             if (initiatives.length === 0) return;
-            // Trova l'iniziativa con l'aggiornamento più recente
-            const latest = [...initiatives].sort((a,b) => (b.last_updated?.seconds || 0) - (a.last_updated?.seconds || 0))[0];
-            if (latest && latest.last_updated) {
+            const sorted = [...initiatives].filter(i => i.last_updated).sort((a,b) => b.last_updated.seconds - a.last_updated.seconds);
+            if (sorted.length > 0) {
+                const latest = sorted[0];
                 const date = latest.last_updated.toDate();
-                document.getElementById('footer-info').innerText = `Ultima modifica: ${date.toLocaleDateString()} ${date.toLocaleTimeString()} | Autore: ${latest.autore}`;
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                const time = date.toLocaleTimeString();
+                document.getElementById('footer-info').innerText = `Ultima modifica: ${day}/${month}/${year} ${time} | Autore: ${latest.autore}`;
             }
         }
 
@@ -238,89 +247,120 @@
         window.onload = initAuth;
     </script>
 </head>
-<body class="bg-slate-50 min-h-screen flex flex-col">
+<body class="bg-slate-50 min-h-screen flex flex-col font-['Inter']">
 
-    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 hidden">
-        <div class="bg-white p-8 rounded-3xl shadow-xl w-80">
-            <h2 class="text-xl font-bold mb-4">CSR Hub Login</h2>
-            <input type="text" id="login-name" placeholder="Nome" class="w-full border p-2 rounded-lg mb-2">
-            <select id="login-role" class="w-full border p-2 rounded-lg mb-4"><option>CSR Manager</option></select>
-            <button onclick="handleLogin(event)" class="w-full bg-emerald-600 text-white py-2 rounded-lg">Entra</button>
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
+        <div class="bg-white p-8 rounded-[2rem] shadow-2xl w-80">
+            <h2 class="text-xl font-bold mb-6 text-center">CSR Strategic Hub</h2>
+            <input type="text" id="login-name" placeholder="Il tuo Nome" class="w-full border p-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-emerald-500">
+            <select id="login-role" class="w-full border p-3 rounded-xl mb-6 outline-none">
+                <option>CSR Manager</option>
+                <option>Analyst</option>
+            </select>
+            <button onclick="handleLogin(event)" class="w-full bg-slate-900 text-white py-3 rounded-xl font-bold active:scale-95 transition-transform">Accedi</button>
         </div>
     </div>
 
-    <div id="main-dashboard" class="hidden flex-grow pb-12">
-        <nav class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10">
-            <span class="font-bold">🌿 CSR Strategic Hub</span>
-            <div class="flex items-center gap-4 text-xs">
-                <span id="user-name-display" class="font-bold">--</span>
-                <button onclick="logout()" class="text-rose-500">Esci</button>
+    <div id="main-dashboard" class="hidden flex-grow pb-16">
+        <nav class="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+            <div class="flex items-center gap-2">
+                <span class="text-xl">📊</span>
+                <span class="font-bold text-slate-800">CSR Dashboard</span>
+            </div>
+            <div class="flex items-center gap-4 text-[10px] font-bold">
+                <span id="user-name-display" class="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full uppercase">--</span>
+                <button onclick="logout()" class="text-rose-500 uppercase">Esci</button>
             </div>
         </nav>
 
         <main class="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <aside class="lg:col-span-4 bg-white p-6 rounded-[2rem] shadow-sm border h-fit">
-                <h3 class="font-bold mb-4">Nuova Iniziativa</h3>
-                <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-3">
-                    <input type="text" id="nome_iniziativa" placeholder="Nome Iniziativa" required class="w-full p-2 border rounded-xl text-sm">
-                    <select id="categoria" class="w-full p-2 border rounded-xl text-sm">
-                        <option>Salute e Inclusione</option>
+            <aside class="lg:col-span-4 bg-white p-6 rounded-[2rem] shadow-sm border h-fit border-slate-100">
+                <h3 class="font-bold mb-6 flex items-center gap-2 text-slate-800">
+                    <span class="w-1.5 h-5 bg-emerald-500 rounded-full"></span> Registra Attività
+                </h3>
+                <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
+                    <input type="text" id="nome_iniziativa" placeholder="Nome Iniziativa" required class="w-full p-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+                    
+                    <select id="categoria" class="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none">
                         <option>Comunità e Ambiente</option>
                         <option>Educazione e Giovani</option>
+                        <option>Salute e Inclusione</option>
                     </select>
+
                     <div class="grid grid-cols-2 gap-2">
-                        <input type="date" id="data_evento" required class="p-2 border rounded-xl text-xs">
-                        <select id="frequenza" class="p-2 border rounded-xl text-xs">
-                            <option value="singolo evento">Singolo Evento</option>
-                            <option value="mensile">Mensile</option>
-                            <option value="trimestrale">Trimestrale</option>
-                            <option value="semestrale">Semestrale</option>
-                            <option value="annuale">Annuale</option>
-                        </select>
+                        <div>
+                            <label class="text-[9px] font-bold text-slate-400 mb-1 block">DATA</label>
+                            <input type="date" id="data_evento" required class="w-full p-2 border border-slate-200 rounded-xl text-xs outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[9px] font-bold text-slate-400 mb-1 block">FREQUENZA</label>
+                            <select id="frequenza" class="w-full p-2 border border-slate-200 rounded-xl text-xs outline-none">
+                                <option value="singolo evento">Singolo Evento</option>
+                                <option value="mensile">Mensile</option>
+                                <option value="trimestrale">Trimestrale</option>
+                                <option value="semestrale">Semestrale</option>
+                                <option value="annuale">Annuale</option>
+                            </select>
+                        </div>
                     </div>
-                    <textarea id="descrizione" placeholder="Note..." class="w-full p-2 border rounded-xl text-sm"></textarea>
+
+                    <textarea id="descrizione" placeholder="Descrizione breve..." class="w-full p-3 border border-slate-200 rounded-xl text-sm h-20 outline-none"></textarea>
+                    
                     <div class="flex gap-2">
-                        <input type="number" id="kpi_valore" placeholder="Valore" required class="w-1/2 p-2 border rounded-xl text-sm">
-                        <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/2 p-2 border rounded-xl text-sm">
+                        <input type="number" id="kpi_valore" placeholder="Valore" required class="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none">
+                        <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none">
                     </div>
-                    <div class="flex items-center gap-2 p-2 bg-slate-50 rounded-xl">
-                        <input type="checkbox" id="alert_attivo">
-                        <label for="alert_attivo" class="text-[10px] font-bold">ATTIVA AVVISO SCADENZA</label>
+
+                    <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-emerald-500">
+                        <label for="alert_attivo" class="text-[10px] font-bold text-slate-600">ATTIVA ALERT RINNOVO</label>
                     </div>
-                    <button type="submit" class="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Registra</button>
+
+                    <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg shadow-slate-200 active:scale-95 transition-transform">
+                        Salva Dati
+                    </button>
                 </form>
             </aside>
 
             <div class="lg:col-span-8 space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-6 rounded-[2rem] border h-72">
-                        <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-4">Mix Categorie</h4>
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72 shadow-sm">
+                        <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-wider">Suddivisione Strategica</h4>
                         <div class="h-48"><canvas id="chart-doughnut"></canvas></div>
                     </div>
-                    <div class="bg-white p-6 rounded-[2rem] border h-72 flex flex-col">
-                        <div id="comparison-nav" class="flex justify-between items-center mb-2 hidden">
-                            <button onclick="changeChart(-1)" class="p-1 hover:bg-slate-100 rounded">◀</button>
-                            <h4 id="current-kpi-label" class="text-[10px] font-bold text-emerald-600 uppercase"></h4>
-                            <button onclick="changeChart(1)" class="p-1 hover:bg-slate-100 rounded">▶</button>
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72 shadow-sm flex flex-col">
+                        <div id="comparison-nav" class="flex justify-between items-center mb-4 hidden">
+                            <button onclick="changeChart(-1)" class="w-6 h-6 flex items-center justify-center bg-slate-50 hover:bg-slate-100 rounded-full text-xs">◀</button>
+                            <h4 id="current-kpi-label" class="text-[10px] font-bold text-emerald-600 uppercase tracking-widest"></h4>
+                            <button onclick="changeChart(1)" class="w-6 h-6 flex items-center justify-center bg-slate-50 hover:bg-slate-100 rounded-full text-xs">▶</button>
                         </div>
                         <div class="flex-grow"><canvas id="chart-comparison"></canvas></div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
-                    <table class="w-full">
-                        <thead class="bg-slate-50 text-[10px] uppercase text-slate-400">
-                            <tr><th class="p-4 text-left">Iniziativa</th><th class="p-4 text-left">Area</th><th class="p-4 text-left">Frequenza</th><th class="p-4 text-right">KPI</th><th class="p-4 text-right">Azioni</th></tr>
+                <div class="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+                    <table class="w-full text-left">
+                        <thead class="bg-slate-50/50 text-[9px] uppercase text-slate-400 font-bold">
+                            <tr>
+                                <th class="p-4">Attività / Data</th>
+                                <th class="p-4">Area</th>
+                                <th class="p-4">Ciclo</th>
+                                <th class="p-4 text-right">Impatto KPI</th>
+                                <th class="p-4 text-right">Azioni</th>
+                            </tr>
                         </thead>
-                        <tbody id="table-body"></tbody>
+                        <tbody id="table-body" class="divide-y divide-slate-50"></tbody>
                     </table>
                 </div>
             </div>
         </main>
     </div>
 
-    <footer class="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t px-6 py-2 text-[10px] text-slate-400 flex justify-center italic">
-        <span id="footer-info">In attesa di dati...</span>
+    <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t px-6 py-3 text-[10px] text-slate-500 flex justify-center items-center shadow-lg z-20">
+        <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+            <span id="footer-info" class="italic">Sistema pronto - In attesa di dati</span>
+        </div>
     </footer>
 
 </body>
