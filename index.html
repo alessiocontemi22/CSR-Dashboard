@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSR Strategic Hub - Pro</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        // --- CONFIGURAZIONE FIREBASE ---
+        // Recupera questi dati dalla Console Firebase -> Impostazioni Progetto
+        const firebaseConfig = {
+            apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
+            authDomain: "csr-dashboard-5e613.firebaseapp.com",
+            projectId: "csr-dashboard-5e613",
+            storageBucket: "csr-dashboard-5e613.firebasestorage.app",
+            messagingSenderId: "662684708122",
+            appId: "1:662684708122:web:6e17a3bd8e31ff18be10a3",
+            measurementId: "G-HQV1X5DELN"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Stato Applicazione
+        let userProfile = JSON.parse(localStorage.getItem('csr_user_profile')) || null;
+        let initiatives = [];
+        let charts = { doughnut: null };
+
+        // Elementi DOM
+        const loginScreen = document.getElementById('login-screen');
+        const mainDashboard = document.getElementById('main-dashboard');
+        const loginForm = document.getElementById('login-form');
+        const initiativeForm = document.getElementById('initiative-form');
+        const userNameDisplay = document.getElementById('user-name-display');
+
+        // --- LOGICA DI ACCESSO ---
+        async function initAuth() {
+            onAuthStateChanged(auth, (user) => {
+                if (user && userProfile) {
+                    showDashboard();
+                } else {
+                    showLogin();
+                }
+            });
+        }
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = e.target.querySelector('button');
+            btn.innerText = "Accesso in corso...";
+            
+            try {
+                // Autenticazione Firebase (Anonima per ora)
+                await signInAnonymously(auth);
+                
+                userProfile = { 
+                    name: document.getElementById('login-name').value, 
+                    role: document.getElementById('login-role').value 
+                };
+                localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
+                showDashboard();
+            } catch (error) {
+                console.error("Errore login:", error);
+                alert("Errore durante l'accesso al database.");
+            } finally {
+                btn.innerText = "Entra nel Sistema";
+            }
+        });
+
+        function showLogin() {
+            loginScreen.classList.remove('hidden');
+            mainDashboard.classList.add('hidden');
+        }
+
+        function showDashboard() {
+            loginScreen.classList.add('hidden');
+            mainDashboard.classList.remove('hidden');
+            userNameDisplay.innerText = userProfile.name;
+            setupRealtimeSync();
+        }
+
+        // --- SINCRONIZZAZIONE DATI ---
+        function setupRealtimeSync() {
+            const colRef = collection(db, 'iniziative');
+            const q = query(colRef, orderBy('timestamp', 'desc'));
+
+            onSnapshot(q, (snapshot) => {
+                initiatives = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                updateUI();
+            });
+        }
+
+        initiativeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = initiativeForm.querySelector('button');
+            btn.disabled = true;
+
+            const payload = {
+                nome_iniziativa: document.getElementById('nome_iniziativa').value,
+                categoria: document.getElementById('categoria').value,
+                descrizione: document.getElementById('descrizione').value,
+                kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
+                kpi_unita: document.getElementById('kpi_unita').value,
+                autore: userProfile.name,
+                timestamp: serverTimestamp()
+            };
+
+            try {
+                await addDoc(collection(db, 'iniziative'), payload);
+                initiativeForm.reset();
+            } catch (err) {
+                console.error("Errore salvataggio:", err);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        // --- UI RENDERING ---
+        function updateUI() {
+            renderTable();
+            renderCharts();
+            renderAuditTrail();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = initiatives.map(item => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td class="p-4">
+                        <div class="font-bold text-slate-800">${item.nome_iniziativa}</div>
+                        <div class="text-[10px] text-slate-400 uppercase">Autore: ${item.autore}</div>
+                    </td>
+                    <td class="p-4"><span class="px-2 py-1 rounded text-[10px] font-bold ${getStyle(item.categoria)}">${item.categoria}</span></td>
+                    <td class="p-4 text-sm text-slate-600">${item.descrizione}</td>
+                    <td class="p-4 text-right font-bold text-emerald-600">${item.kpi_valore} ${item.kpi_unita}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderCharts() {
+            const stats = initiatives.reduce((acc, curr) => {
+                acc[curr.categoria] = (acc[curr.categoria] || 0) + 1;
+                return acc;
+            }, {});
+
+            const ctxD = document.getElementById('chart-doughnut').getContext('2d');
+            if(charts.doughnut) charts.doughnut.destroy();
+            charts.doughnut = new Chart(ctxD, {
+                type: 'doughnut',
+                data: {
+                    labels: Object.keys(stats),
+                    datasets: [{
+                        data: Object.values(stats),
+                        backgroundColor: ['#10b981', '#3b82f6', '#f59e0b'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        function renderAuditTrail() {
+            const trail = document.getElementById('audit-trail');
+            trail.innerHTML = initiatives.slice(0, 5).map(item => `
+                <div class="mb-3 text-xs">
+                    <strong>${item.autore}</strong> ha aggiunto "${item.nome_iniziativa}"
+                </div>
+            `).join('');
+        }
+
+        function getStyle(cat) {
+            return cat === 'Salute e Inclusione' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700';
+        }
+
+        window.logout = () => {
+            auth.signOut();
+            localStorage.removeItem('csr_user_profile');
+            location.reload();
+        };
+
+        window.onload = initAuth;
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .chart-container { position: relative; height: 200px; }
+    </style>
+</head>
+<body class="min-h-screen">
+    </body>
+</html>
