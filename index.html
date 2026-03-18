@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Full Reporting</title>
+    <title>CSR Strategic Hub - Enterprise Report</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -32,70 +32,106 @@
         let initiatives = [];
         let charts = { doughnut: null, bar: null };
         let editingId = null;
-        let currentUnitIndex = 0;
 
         const categoryColors = {
-            "Comunità e Ambiente": "#10b981",
-            "Educazione e Giovani": "#3b82f6",
-            "Salute e Inclusione": "#f59e0b"
+            "Comunità e Ambiente": "#059669", // Emerald 600
+            "Educazione e Giovani": "#2563eb", // Blue 600
+            "Salute e Inclusione": "#d97706"   // Amber 600
         };
 
-        function formatDate(dateString) {
-            if (!dateString) return "N/D";
-            const [year, month, day] = dateString.split("-");
-            return `${day}/${month}/${year}`;
-        }
-
-        // --- EXPORT EXCEL (CSV) CON DESCRIZIONI ---
-        window.exportToExcel = () => {
-            if (initiatives.length === 0) return alert("Nessun dato da esportare");
-
-            let csvContent = "data:text/csv;charset=utf-8,";
-            // Header
-            csvContent += "Nome Iniziativa,Categoria,Data,Frequenza,KPI Valore,Unita,Autore,Descrizione\n";
-
-            initiatives.forEach(item => {
-                // Pulizia descrizione: togliamo a capo e gestiamo le virgolette
-                const cleanDesc = item.descrizione ? item.descrizione.replace(/\n/g, " ").replace(/"/g, '""') : "";
-                
-                const row = [
-                    `"${item.nome_iniziativa}"`,
-                    `"${item.categoria}"`,
-                    `"${formatDate(item.data_evento)}"`,
-                    `"${item.frequenza}"`,
-                    `"${item.kpi_valore}"`,
-                    `"${item.kpi_unita}"`,
-                    `"${item.autore}"`,
-                    `"${cleanDesc}"`
-                ].join(",");
-                csvContent += row + "\n";
-            });
-
-            const link = document.createElement("a");
-            link.setAttribute("href", encodeURI(csvContent));
-            link.setAttribute("download", `CSR_Report_Dati_${new Date().toLocaleDateString()}.csv`);
-            link.click();
+        const categoryIcons = {
+            "Comunità e Ambiente": "🌱",
+            "Educazione e Giovani": "📚",
+            "Salute e Inclusione": "🤝"
         };
 
-        // --- DOWNLOAD PDF ---
+        // --- PDF DOWNLOAD OTTIMIZZATO ---
         window.downloadPDF = () => {
-            const element = document.getElementById('report-area');
+            const element = document.getElementById('report-container');
             const opt = {
-                margin: [10, 10],
-                filename: `CSR_Strategic_Report_${new Date().toLocaleDateString()}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
+                margin: [15, 15],
+                filename: `CSR_Strategic_Report_${new Date().getFullYear()}.pdf`,
+                image: { type: 'jpeg', quality: 1 },
+                html2canvas: { scale: 3, useCORS: true, letterRendering: true },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
 
             const style = document.createElement('style');
-            style.innerHTML = ".no-export { display: none !important; }";
+            style.innerHTML = ".no-export { display: none !important; } #report-container { width: 100% !important; padding: 0 !important; } .impact-card { break-inside: avoid; }";
             document.head.appendChild(style);
 
             html2pdf().set(opt).from(element).save().then(() => style.remove());
         };
 
-        // --- LOGICA DI AUTENTICAZIONE ---
+        // --- EXPORT EXCEL CON DESCRIZIONI ---
+        window.exportToExcel = () => {
+            let csv = "Iniziativa,Area,Data,Ciclo,Valore,Unita,Descrizione,Autore\n";
+            initiatives.forEach(i => {
+                const cleanDesc = i.descrizione ? i.descrizione.replace(/\n/g, " ").replace(/"/g, '""') : "";
+                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.frequenza}","${i.kpi_valore}","${i.kpi_unita}","${cleanDesc}","${i.autore}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "CSR_Data_Export.csv";
+            link.click();
+        };
+
+        // --- RENDER KPI HIGHLIGHTS (IMPACT CARDS) ---
+        function renderImpactCards() {
+            const container = document.getElementById('impact-highlights');
+            // Aggreghiamo i valori per unità di misura
+            const totals = initiatives.reduce((acc, curr) => {
+                const key = curr.kpi_unita.toUpperCase();
+                if (!acc[key]) acc[key] = { val: 0, cat: curr.categoria };
+                acc[key].val += curr.kpi_valore;
+                return acc;
+            }, {});
+
+            container.innerHTML = Object.entries(totals).slice(0, 4).map(([unit, data]) => `
+                <div class="impact-card bg-white p-6 rounded-[1.5rem] border border-slate-100 shadow-sm flex flex-col justify-center transition-all hover:shadow-md">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Totale ${unit}</span>
+                    <div class="flex items-baseline gap-2">
+                        <span class="text-3xl font-black text-slate-900 tracking-tighter">${data.val.toLocaleString()}</span>
+                        <span class="text-xs font-bold text-slate-500">${unit}</span>
+                    </div>
+                    <div class="mt-3 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full" style="background:${categoryColors[data.cat]}"></span>
+                        <span class="text-[9px] font-bold text-slate-500 uppercase">Impact Lead: ${data.cat}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- RENDER TABELLA CON TAG COLORATI ---
+        function renderTable() {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = initiatives.map(item => `
+                <tr class="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                    <td class="p-4">
+                        <div class="font-bold text-slate-900 text-sm">${item.nome_iniziativa}</div>
+                        <div class="font-serif text-[11px] text-slate-500 italic max-w-xs truncate">${item.descrizione || ''}</div>
+                    </td>
+                    <td class="p-4">
+                        <span class="px-3 py-1 rounded-full text-[9px] font-bold uppercase tracking-tighter text-white" style="background:${categoryColors[item.categoria]}">
+                            ${categoryIcons[item.categoria]} ${item.categoria}
+                        </span>
+                    </td>
+                    <td class="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">${item.frequenza}</td>
+                    <td class="p-4 text-right">
+                        <div class="text-sm font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div>
+                        <div class="text-[9px] text-emerald-600 font-bold uppercase tracking-tighter">Target Raggiunto</div>
+                    </td>
+                    <td class="p-4 text-right no-export">
+                        <button onclick="editItem('${item.id}')" class="p-2 hover:bg-blue-50 rounded-lg text-blue-500 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // --- CORE LOGIC (Firebase & Charts) ---
         async function initAuth() {
             onAuthStateChanged(auth, (user) => {
                 if (user && userProfile) { showDashboard(); } 
@@ -105,29 +141,36 @@
 
         window.handleLogin = async (e) => {
             e.preventDefault();
-            const name = document.getElementById('login-name').value;
-            if(!name) return alert("Nome obbligatorio");
-            userProfile = { name, role: "CSR Manager" };
+            userProfile = { name: document.getElementById('login-name').value };
             localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
             await signInAnonymously(auth);
         };
 
-        function showLogin() { 
-            document.getElementById('login-screen').classList.remove('hidden'); 
-            document.getElementById('main-dashboard').classList.add('hidden'); 
-        }
-
+        function showLogin() { document.getElementById('login-screen').classList.remove('hidden'); document.getElementById('main-dashboard').classList.add('hidden'); }
         function showDashboard() { 
             document.getElementById('login-screen').classList.add('hidden'); 
             document.getElementById('main-dashboard').classList.remove('hidden'); 
-            document.getElementById('user-name-display').innerText = userProfile.name;
-            setupRealtimeSync(); 
+            onSnapshot(query(collection(db, 'iniziative'), orderBy('timestamp', 'desc')), (snap) => {
+                initiatives = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                updateUI();
+            });
         }
 
-        function setupRealtimeSync() {
-            onSnapshot(query(collection(db, 'iniziative'), orderBy('timestamp', 'desc')), (snapshot) => {
-                initiatives = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                updateUI();
+        function updateUI() {
+            renderImpactCards();
+            renderTable();
+            renderCharts();
+            const last = initiatives[0]?.last_updated?.toDate();
+            if(last) document.getElementById('footer-info').innerText = `Sync: ${last.toLocaleDateString()} ${last.toLocaleTimeString()} | ${userProfile.name}`;
+        }
+
+        function renderCharts() {
+            const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
+            if(charts.doughnut) charts.doughnut.destroy();
+            charts.doughnut = new Chart(document.getElementById('chart-doughnut').getContext('2d'), {
+                type: 'doughnut',
+                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: Object.keys(stats).map(c => categoryColors[c]), borderWidth: 0 }] },
+                options: { maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, font: { size: 10, weight: 'bold' }, padding: 15 } } } }
             });
         }
 
@@ -138,195 +181,155 @@
                 categoria: document.getElementById('categoria').value,
                 descrizione: document.getElementById('descrizione').value,
                 kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
-                kpi_unita: document.getElementById('kpi_unita').value.toLowerCase().trim(),
+                kpi_unita: document.getElementById('kpi_unita').value,
                 data_evento: document.getElementById('data_evento').value,
                 frequenza: document.getElementById('frequenza').value,
-                alert_attivo: document.getElementById('alert_attivo').checked,
                 autore: userProfile.name,
-                last_updated: serverTimestamp(),
-                timestamp: serverTimestamp()
+                timestamp: serverTimestamp(),
+                last_updated: serverTimestamp()
             };
-            if (editingId) { await updateDoc(doc(db, 'iniziative', editingId), payload); editingId = null; } 
-            else { await addDoc(collection(db, 'iniziative'), payload); }
+            await addDoc(collection(db, 'iniziative'), payload);
             e.target.reset();
         };
 
-        window.deleteItem = async (id) => { if(confirm("Eliminare?")) await deleteDoc(doc(db, 'iniziative', id)); };
-        window.editItem = (id) => {
-            const item = initiatives.find(i => i.id === id);
-            editingId = id;
-            document.getElementById('nome_iniziativa').value = item.nome_iniziativa;
-            document.getElementById('categoria').value = item.categoria;
-            document.getElementById('kpi_valore').value = item.kpi_valore;
-            document.getElementById('kpi_unita').value = item.kpi_unita;
-            document.getElementById('data_evento').value = item.data_evento;
-            document.getElementById('frequenza').value = item.frequenza;
-            document.getElementById('alert_attivo').checked = item.alert_attivo;
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        };
-
-        function updateUI() {
-            const tbody = document.getElementById('table-body');
-            tbody.innerHTML = initiatives.map(item => `
-                <tr class="border-b border-slate-50 text-[11px]">
-                    <td class="p-4"><strong>${item.nome_iniziativa}</strong><br><span class="text-slate-400">${formatDate(item.data_evento)}</span></td>
-                    <td class="p-4"><span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full" style="background:${categoryColors[item.categoria]}"></span>${item.categoria}</span></td>
-                    <td class="p-4 uppercase text-[9px] font-bold text-slate-500">${item.frequenza}</td>
-                    <td class="p-4 text-right font-bold text-slate-700">${item.kpi_valore} ${item.kpi_unita}</td>
-                    <td class="p-4 text-right no-export">
-                        <button onclick="editItem('${item.id}')" class="text-blue-500 mr-2 hover:underline">Mod</button>
-                        <button onclick="deleteItem('${item.id}')" class="text-rose-500 hover:underline">Elimina</button>
-                    </td>
-                </tr>`).join('');
-            
-            const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
-            if(charts.doughnut) charts.doughnut.destroy();
-            charts.doughnut = new Chart(document.getElementById('chart-doughnut').getContext('2d'), {
-                type: 'doughnut',
-                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: Object.keys(stats).map(c => categoryColors[c]), borderWidth: 0 }] },
-                options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } } }
-            });
-            renderComparisonChart();
-            updateFooter();
-        }
-
-        function renderComparisonChart() {
-            const groups = initiatives.reduce((acc, curr) => { const u = curr.kpi_unita; if (!acc[u]) acc[u] = []; acc[u].push(curr); return acc; }, {});
-            const units = Object.keys(groups).filter(u => groups[u].length >= 2);
-            if (units.length === 0) { document.getElementById('comparison-nav').classList.add('hidden'); return; }
-            document.getElementById('comparison-nav').classList.remove('hidden');
-            const activeUnit = units[currentUnitIndex % units.length];
-            const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
-            document.getElementById('current-kpi-label').innerText = `KPI: ${activeUnit.toUpperCase()}`;
-            const ctx = document.getElementById('chart-comparison').getContext('2d');
-            if(charts.bar) charts.bar.destroy();
-            charts.bar = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: dataSet.map(i => `${i.nome_iniziativa} (${formatDate(i.data_evento)})`),
-                    datasets: [{ data: dataSet.map(i => i.kpi_valore), backgroundColor: dataSet.map(i => categoryColors[i.categoria]), borderRadius: 4 }]
-                },
-                options: { maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { font: { size: 8 } } } } }
-            });
-        }
-
-        function updateFooter() {
-            const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated.seconds - a.last_updated.seconds);
-            if (sorted.length > 0) {
-                const d = sorted[0].last_updated.toDate();
-                document.getElementById('footer-info').innerText = `Aggiornato: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} | User: ${sorted[0].autore}`;
-            }
-        }
-
         window.logout = async () => { localStorage.removeItem('csr_user_profile'); await signOut(auth); location.reload(); };
-        window.changeChart = (dir) => { currentUnitIndex = (currentUnitIndex + dir + 100) % 100; renderComparisonChart(); };
         window.onload = initAuth;
     </script>
     
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Lora:ital,wght@0,400;1,400&display=swap');
+        
         body { font-family: 'Inter', sans-serif; }
+        .font-serif { font-family: 'Lora', serif; }
+        
+        /* Layout Scrollbar Pulito */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+
+        @media print {
+            .no-export { display: none !important; }
+            body { background: white !important; }
+            .impact-card { border: 1px solid #f1f5f9 !important; }
+        }
     </style>
 </head>
-<body class="bg-[#fcfdfe] min-h-screen">
+<body class="bg-[#f8fafc] min-h-screen">
 
-    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-md hidden">
-        <div class="bg-white p-8 rounded-[2rem] shadow-2xl w-80 text-center">
-            <h2 class="text-xl font-bold mb-6">CSR Strategic Hub</h2>
+    <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xl hidden">
+        <div class="bg-white p-10 rounded-[2.5rem] shadow-2xl w-96 text-center border border-white/20">
+            <div class="text-4xl mb-4">🌿</div>
+            <h2 class="text-2xl font-black text-slate-800 tracking-tighter mb-8">CSR Strategic Hub</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" placeholder="Tuo Nome" required class="w-full border p-3 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 text-center">
-                <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold active:scale-95 transition-all">Accedi</button>
+                <input type="text" id="login-name" placeholder="Il tuo nome" required class="w-full bg-slate-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-center font-bold">
+                <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl hover:bg-slate-800 active:scale-95 transition-all">Inizia Sessione</button>
             </form>
         </div>
     </div>
 
     <div id="main-dashboard" class="hidden">
-        <nav class="bg-white/80 backdrop-blur-md border-b p-4 flex justify-between items-center sticky top-0 z-10 no-export">
-            <span class="font-bold text-slate-800">🌿 CSR HUB</span>
-            <div class="flex items-center gap-4 text-[10px] font-bold">
-                <span id="user-name-display" class="bg-slate-100 px-3 py-1.5 rounded-full uppercase">--</span>
-                <button onclick="logout()" class="text-rose-500 uppercase hover:underline">Esci</button>
+        <nav class="bg-white/80 backdrop-blur-md border-b border-slate-100 p-5 flex justify-between items-center sticky top-0 z-40 no-export">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-xs">CSR</div>
+                <span class="font-black text-slate-800 tracking-tighter uppercase text-sm">Strategic Hub</span>
+            </div>
+            <div class="flex items-center gap-6">
+                <div class="flex gap-2">
+                    <button onclick="exportToExcel()" class="bg-slate-100 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200">Dati CSV</button>
+                    <button onclick="downloadPDF()" class="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-lg shadow-emerald-100">Report PDF</button>
+                </div>
+                <button onclick="logout()" class="text-rose-500 font-bold text-[10px] uppercase tracking-widest">Logout</button>
             </div>
         </nav>
 
-        <main class="max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-            <aside class="lg:col-span-4 no-export">
-                <div class="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 sticky top-24">
-                    <h3 class="font-bold mb-6 text-slate-800">📝 Inserimento Dati</h3>
-                    <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
-                        <input type="text" id="nome_iniziativa" placeholder="Nome Iniziativa" required class="w-full p-3 bg-slate-50 border-none rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500">
-                        <select id="categoria" class="w-full p-3 bg-slate-50 border-none rounded-xl text-sm outline-none">
-                            <option>Comunità e Ambiente</option>
-                            <option>Educazione e Giovani</option>
-                            <option>Salute e Inclusione</option>
-                        </select>
-                        <div class="grid grid-cols-2 gap-2">
-                            <input type="date" id="data_evento" required class="p-3 bg-slate-50 border-none rounded-xl text-xs outline-none">
-                            <select id="frequenza" class="p-3 bg-slate-50 border-none rounded-xl text-xs outline-none">
-                                <option value="singolo evento">Singolo Evento</option>
-                                <option value="mensile">Mensile</option>
-                                <option value="trimestrale">Trimestrale</option>
-                                <option value="semestrale">Semestrale</option>
-                                <option value="annuale">Annuale</option>
-                            </select>
+        <main class="max-w-7xl mx-auto p-6 md:p-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
+            
+            <div id="report-container" class="lg:col-span-8 space-y-8">
+                
+                <section>
+                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Key Impact Highlights</h3>
+                    <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         </div>
-                        <textarea id="descrizione" placeholder="Descrizione dell'attività..." class="w-full p-3 bg-slate-50 border-none rounded-xl text-sm h-24 outline-none focus:ring-2 focus:ring-emerald-500"></textarea>
-                        <div class="flex gap-2">
-                            <input type="number" id="kpi_valore" placeholder="Valore" required class="w-1/2 p-3 bg-slate-50 border-none rounded-xl text-sm outline-none">
-                            <input type="text" id="kpi_unita" placeholder="Unità (es: Ore, €)" required class="w-1/2 p-3 bg-slate-50 border-none rounded-xl text-sm outline-none">
-                        </div>
-                        <div class="flex items-center gap-3 p-3 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                            <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-emerald-500">
-                            <label class="text-[10px] font-bold text-emerald-800">ATTIVA ALERT SCADENZA</label>
-                        </div>
-                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg shadow-slate-200 active:scale-95 transition-all">Salva Attività</button>
-                    </form>
-                </div>
-            </aside>
+                </section>
 
-            <div id="report-area" class="lg:col-span-8 space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72 shadow-sm">
-                        <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-widest">Mix Strategico</h4>
-                        <div class="h-48"><canvas id="chart-doughnut"></canvas></div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm h-80 flex flex-col">
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Mix Strategico per Area</h4>
+                        <div class="flex-grow"><canvas id="chart-doughnut"></canvas></div>
                     </div>
-                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 h-72 shadow-sm flex flex-col">
-                        <div id="comparison-nav" class="flex justify-between items-center mb-4 no-export">
-                            <button onclick="changeChart(-1)" class="w-7 h-7 bg-slate-50 rounded-full text-xs hover:bg-slate-100">◀</button>
-                            <h4 id="current-kpi-label" class="text-[10px] font-bold text-emerald-600 uppercase tracking-widest"></h4>
-                            <button onclick="changeChart(1)" class="w-7 h-7 bg-slate-50 rounded-full text-xs hover:bg-slate-100">▶</button>
+                    <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm h-80 flex flex-col">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Analisi KPI</h4>
+                            <div id="comparison-nav" class="flex gap-2 no-export">
+                                <button onclick="changeChart(-1)" class="w-6 h-6 bg-slate-50 rounded-lg text-[10px]">◀</button>
+                                <button onclick="changeChart(1)" class="w-6 h-6 bg-slate-50 rounded-lg text-[10px]">▶</button>
+                            </div>
                         </div>
+                        <h5 id="current-kpi-label" class="text-xs font-black text-emerald-600 mb-4">--</h5>
                         <div class="flex-grow"><canvas id="chart-comparison"></canvas></div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
-                    <div class="p-6 border-b border-slate-50 flex justify-between items-center no-export">
-                        <h3 class="font-bold text-slate-800 text-sm">Registro Operativo</h3>
-                        <div class="flex gap-2">
-                            <button onclick="exportToExcel()" class="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-emerald-100">Export CSV/Excel</button>
-                            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-slate-800">Scarica Report PDF</button>
-                        </div>
+                <div class="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                    <div class="p-8 border-b border-slate-50">
+                        <h3 class="font-black text-slate-800 tracking-tighter">Registro degli Interventi</h3>
                     </div>
-                    <table class="w-full text-left">
-                        <thead class="bg-slate-50/50 text-[9px] uppercase text-slate-400 font-bold tracking-widest">
-                            <tr>
-                                <th class="p-4">Attività</th>
-                                <th class="p-4">Area Area</th>
-                                <th class="p-4">Ciclo</th>
-                                <th class="p-4 text-right">Impatto</th>
-                                <th class="p-4 text-right no-export">Azioni</th>
-                            </tr>
-                        </thead>
-                        <tbody id="table-body" class="divide-y divide-slate-50"></tbody>
-                    </table>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50/50 text-[10px] uppercase font-black text-slate-400 tracking-widest">
+                                <tr>
+                                    <th class="p-5">Dettaglio Attività</th>
+                                    <th class="p-5">Pilastro</th>
+                                    <th class="p-5">Ciclo</th>
+                                    <th class="p-5 text-right">Impatto Misurato</th>
+                                    <th class="p-5 no-export"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body" class="divide-y divide-slate-50">
+                                </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
+
+            <aside class="lg:col-span-4 no-export">
+                <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-28">
+                    <h3 class="font-black text-slate-800 mb-6 text-lg tracking-tighter">Nuova Voce</h3>
+                    <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-5">
+                        <input type="text" id="nome_iniziativa" placeholder="Nome Attività" required class="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-slate-900 transition-all">
+                        
+                        <select id="categoria" class="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none cursor-pointer">
+                            <option>Comunità e Ambiente</option>
+                            <option>Educazione e Giovani</option>
+                            <option>Salute e Inclusione</option>
+                        </select>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="date" id="data_evento" required class="p-4 bg-slate-50 border-none rounded-2xl text-xs font-bold outline-none">
+                            <select id="frequenza" class="p-4 bg-slate-50 border-none rounded-2xl text-xs font-bold outline-none">
+                                <option value="singolo">Singolo Evento</option>
+                                <option value="mensile">Mensile</option>
+                                <option value="trimestrale">Trimestrale</option>
+                                <option value="annuale">Annuale</option>
+                            </select>
+                        </div>
+
+                        <textarea id="descrizione" placeholder="Narrazione dell'impatto..." class="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-serif h-32 outline-none focus:ring-2 focus:ring-slate-900"></textarea>
+                        
+                        <div class="flex gap-3">
+                            <input type="number" id="kpi_valore" placeholder="Valore" required class="w-2/3 p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none">
+                            <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/3 p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none">
+                        </div>
+
+                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl shadow-slate-200 active:scale-95 transition-all">Registra</button>
+                    </form>
+                </div>
+            </aside>
         </main>
     </div>
 
-    <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t px-6 py-4 text-[10px] text-slate-400 flex justify-center no-export">
-        <span id="footer-info" class="italic font-medium">Connessione al database attiva...</span>
+    <footer class="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-100 px-8 py-3 text-[9px] text-slate-400 flex justify-between items-center z-50 no-export">
+        <span id="footer-info" class="font-bold uppercase tracking-widest">In attesa di dati...</span>
+        <span class="font-black text-slate-800">CSR STRATEGIC HUB © 2026</span>
     </footer>
 
 </body>
