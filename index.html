@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Intelligence v3.4</title>
+    <title>CSR Strategic Hub - Intelligence v3.5</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -34,7 +34,7 @@
         let initiatives = [];
         let charts = { doughnut: null, bar: null };
         let currentUnitIndex = 0;
-        let editingId = null; // Stato per la modifica
+        let editingId = null;
 
         const categoryColors = {
             "Comunità e Ambiente": "#059669",
@@ -44,7 +44,7 @@
 
         const formatDate = (d) => d ? d.split('-').reverse().join('/') : '--';
 
-        // --- CALCOLO SCADENZA DINAMICO ---
+        // --- LOGICA SCADENZA ---
         const getExpiryStatus = (item, allInitiatives) => {
             const hasNewer = allInitiatives.some(i => 
                 i.nome_iniziativa === item.nome_iniziativa && 
@@ -65,14 +65,14 @@
             today.setHours(0,0,0,0);
             const diffDays = Math.ceil((nextDue - today) / (1000 * 60 * 60 * 24));
 
-            if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase tracking-tighter">Scaduta da ${Math.abs(diffDays)}g</span>`;
+            if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase">Scaduta da ${Math.abs(diffDays)}g</span>`;
             if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px] uppercase">Scade Oggi</span>`;
             return `<span class="text-amber-600 font-bold text-[7px] uppercase tracking-tighter">Scade tra ${diffDays}g</span>`;
         };
 
-        // --- AZIONI CRUD ---
+        // --- CRUD ACTIONS ---
         window.deleteInitiative = async (id) => {
-            if(confirm("Eliminare definitivamente questo record?")) {
+            if(confirm("Sei sicuro di voler eliminare questo record?")) {
                 await deleteDoc(doc(db, "iniziative", id));
             }
         };
@@ -80,7 +80,6 @@
         window.editInitiative = (id) => {
             const item = initiatives.find(i => i.id === id);
             if(!item) return;
-
             editingId = id;
             document.getElementById('nome_iniziativa').value = item.nome_iniziativa;
             document.getElementById('categoria').value = item.categoria;
@@ -94,7 +93,7 @@
             const btn = document.getElementById('submit-btn');
             btn.innerText = "Aggiorna Record";
             btn.classList.replace('bg-slate-900', 'bg-blue-600');
-            document.getElementById('form-title').innerText = "Modifica Record";
+            document.getElementById('form-title').innerText = "Modifica Attività";
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
@@ -116,9 +115,8 @@
             if (editingId) {
                 await updateDoc(doc(db, "iniziative", editingId), payload);
                 editingId = null;
-                const btn = document.getElementById('submit-btn');
-                btn.innerText = "Salva";
-                btn.classList.replace('bg-blue-600', 'bg-slate-900');
+                document.getElementById('submit-btn').innerText = "Salva";
+                document.getElementById('submit-btn').classList.replace('bg-blue-600', 'bg-slate-900');
                 document.getElementById('form-title').innerText = "Registra Attività";
             } else {
                 payload.timestamp = serverTimestamp();
@@ -127,45 +125,26 @@
             e.target.reset();
         };
 
-        // --- GRAFICI ---
-        function renderComparisonChart() {
-            const nameCounts = initiatives.reduce((acc, curr) => { acc[curr.nome_iniziativa] = (acc[curr.nome_iniziativa] || 0) + 1; return acc; }, {});
-            const repeated = initiatives.filter(i => nameCounts[i.nome_iniziativa] > 1);
-            const groups = repeated.reduce((acc, curr) => { 
-                const u = curr.kpi_unita.toUpperCase(); 
-                if (!acc[u]) acc[u] = []; 
-                acc[u].push(curr); 
-                return acc; 
-            }, {});
-
-            const units = Object.keys(groups);
-            const container = document.getElementById('chart-bar-container');
-            if (units.length === 0) {
-                container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10">Inserisci rinnovi per attivare il trend.</div>`;
-                return;
-            }
-            container.innerHTML = `<canvas id="chart-comparison"></canvas>`;
-            const activeUnit = units[currentUnitIndex % units.length];
-            const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
-            document.getElementById('current-kpi-label').innerText = `STORICO KPI: ${activeUnit}`;
-            
-            const ctx = document.getElementById('chart-comparison').getContext('2d');
-            if(charts.bar) charts.bar.destroy();
-            charts.bar = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: dataSet.map(i => [i.nome_iniziativa, `(${formatDate(i.data_evento)})`]),
-                    datasets: [{ data: dataSet.map(i => i.kpi_valore), backgroundColor: dataSet.map(i => categoryColors[i.categoria]), borderRadius: 6 }]
-                },
-                options: { 
-                    maintainAspectRatio: false, 
-                    layout: { padding: { top: 35 } },
-                    plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'top', offset: 2, color: '#1e293b', font: { weight: 'black', size: 10 } } },
-                    scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 8, weight: 'bold' } } } }
-                }
+        // --- EXPORT & PDF ---
+        window.exportToExcel = () => {
+            let csv = "\uFEFFIniziativa,Area,Data,Valore,Unita,Frequenza,Autore\n";
+            initiatives.forEach(i => {
+                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.kpi_valore}","${i.kpi_unita}","${i.frequenza}","${i.autore}"\n`;
             });
-        }
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `Export_CSR_Data.csv`;
+            link.click();
+        };
 
+        window.downloadPDF = async () => {
+            const element = document.getElementById('report-container');
+            const opt = { margin: 10, filename: 'CSR_Strategy_Report.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+            await html2pdf().set(opt).from(element).save();
+        };
+
+        // --- UI UPDATE ---
         function updateUI() {
             // Highlights
             const totals = initiatives.reduce((acc, curr) => {
@@ -188,15 +167,19 @@
                         <div class="flex items-center gap-2">
                             <div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div>
                             <div class="hidden group-hover:flex gap-1 no-export">
-                                <button onclick="editInitiative('${item.id}')" class="text-[10px] bg-slate-100 p-1 rounded hover:bg-blue-100 text-blue-600">✏️</button>
-                                <button onclick="deleteInitiative('${item.id}')" class="text-[10px] bg-slate-100 p-1 rounded hover:bg-red-100 text-red-600">🗑️</button>
+                                <button onclick="editInitiative('${item.id}')" class="text-[10px] bg-slate-50 p-1 rounded hover:bg-blue-100">✏️</button>
+                                <button onclick="deleteInitiative('${item.id}')" class="text-[10px] bg-slate-50 p-1 rounded hover:bg-red-100">🗑️</button>
                             </div>
                         </div>
                         <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">
                             <span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione || '...'}
                         </div>
                     </td>
-                    <td class="p-4"><div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white text-center min-w-[140px]" style="background:${categoryColors[item.categoria]};">${item.categoria.toUpperCase()}</div></td>
+                    <td class="p-4 text-center">
+                        <div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white min-w-[130px]" style="background:${categoryColors[item.categoria]};">
+                            ${item.categoria.toUpperCase()}
+                        </div>
+                    </td>
                     <td class="p-4 text-center font-bold text-[9px] text-slate-500 uppercase">${item.frequenza}</td>
                     <td class="p-4 text-right">
                         <div class="text-xs font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div>
@@ -204,8 +187,54 @@
                     </td>
                 </tr>`).join('');
 
+            // FOOTER DINAMICO
+            const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated?.seconds - a.last_updated?.seconds);
+            if (sorted.length > 0) {
+                const last = sorted[0].last_updated.toDate();
+                document.getElementById('footer-info').innerHTML = `ULTIMO AGGIORNAMENTO: <b>${last.toLocaleDateString()} ${last.toLocaleTimeString()}</b> | OPERATORE: <b>${sorted[0].autore.toUpperCase()}</b>`;
+            }
+
             renderDoughnut();
             renderComparisonChart();
+        }
+
+        // --- CHARTING ---
+        function renderComparisonChart() {
+            const nameCounts = initiatives.reduce((acc, curr) => { acc[curr.nome_iniziativa] = (acc[curr.nome_iniziativa] || 0) + 1; return acc; }, {});
+            const repeated = initiatives.filter(i => nameCounts[i.nome_iniziativa] > 1);
+            const groups = repeated.reduce((acc, curr) => { 
+                const u = curr.kpi_unita.toUpperCase(); 
+                if (!acc[u]) acc[u] = []; 
+                acc[u].push(curr); 
+                return acc; 
+            }, {});
+
+            const units = Object.keys(groups);
+            const container = document.getElementById('chart-bar-container');
+            if (units.length === 0) {
+                container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10 leading-relaxed">Nessun confronto disponibile. Inserisci più record per la stessa attività.</div>`;
+                return;
+            }
+            container.innerHTML = `<canvas id="chart-comparison"></canvas>`;
+            const activeUnit = units[currentUnitIndex % units.length];
+            const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
+            document.getElementById('current-kpi-label').innerText = `STORICO KPI: ${activeUnit}`;
+            
+            const ctx = document.getElementById('chart-comparison').getContext('2d');
+            if(charts.bar) charts.bar.destroy();
+            charts.bar = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: dataSet.map(i => [i.nome_iniziativa, `(${formatDate(i.data_evento)})`]),
+                    datasets: [{ data: dataSet.map(i => i.kpi_valore), backgroundColor: dataSet.map(i => categoryColors[i.categoria]), borderRadius: 6 }]
+                },
+                options: { 
+                    maintainAspectRatio: false, 
+                    layout: { padding: { top: 35 } },
+                    plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'top', offset: 2, color: '#1e293b', font: { weight: 'black', size: 10 } } },
+                    scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 8, weight: 'bold' } } } }
+                }
+            });
         }
 
         function renderDoughnut() {
@@ -240,11 +269,6 @@
             }
         };
         window.changeChart = (dir) => { currentUnitIndex += dir; if(currentUnitIndex<0) currentUnitIndex=0; renderComparisonChart(); };
-        window.downloadPDF = async () => {
-            const element = document.getElementById('report-container');
-            const opt = { margin: 10, filename: 'CSR_Report.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
-            await html2pdf().set(opt).from(element).save();
-        };
     </script>
     
     <style>
@@ -260,7 +284,7 @@
         <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center">
             <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" placeholder="Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
+                <input type="text" id="login-name" placeholder="Nome Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
                 <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl">Entra</button>
             </form>
         </div>
@@ -269,7 +293,7 @@
     <div id="main-dashboard" class="hidden">
         <nav class="bg-white/80 backdrop-blur-md border-b border-slate-100 p-6 flex justify-between items-center sticky top-0 z-40 no-export">
             <span class="font-black text-xs tracking-[0.3em] uppercase text-slate-900">CSR Strategic Hub</span>
-            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Esporta PDF</button>
+            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Esporta Report PDF</button>
         </nav>
 
         <main class="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
@@ -285,7 +309,7 @@
                         <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Focus Strategico</h4>
                         <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-6">
                             <span id="center-total" class="text-3xl font-black text-slate-900">0</span>
-                            <span class="text-[8px] font-bold text-slate-400 uppercase">Progetti</span>
+                            <span class="text-[8px] font-bold text-slate-400 uppercase">Input</span>
                         </div>
                         <div class="h-52"><canvas id="chart-doughnut"></canvas></div>
                     </div>
@@ -293,11 +317,11 @@
                         <div class="flex justify-between items-center no-export">
                             <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Growth Trend</h4>
                             <div class="flex gap-1">
-                                <button onclick="changeChart(-1)" class="p-1 bg-slate-50 rounded">◀</button>
-                                <button onclick="changeChart(1)" class="p-1 bg-slate-50 rounded">▶</button>
+                                <button onclick="changeChart(-1)" class="p-1.5 bg-slate-50 rounded-lg text-xs hover:bg-slate-100 transition-colors">◀</button>
+                                <button onclick="changeChart(1)" class="p-1.5 bg-slate-50 rounded-lg text-xs hover:bg-slate-100 transition-colors">▶</button>
                             </div>
                         </div>
-                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-2">--</h5>
+                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-2 tracking-tighter">--</h5>
                         <div id="chart-bar-container" class="flex-grow"></div>
                     </div>
                 </section>
@@ -305,6 +329,7 @@
                 <section class="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
                     <div class="p-8 border-b border-slate-50 flex justify-between items-center">
                         <h3 class="font-black text-xs tracking-tighter uppercase text-slate-900">Registro Attività e Scadenziario</h3>
+                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors">Scarica CSV</button>
                     </div>
                     <table class="w-full text-left">
                         <thead class="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
@@ -345,7 +370,7 @@
                             <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-amber-600">
                             <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Pianifica Rinnovo</label>
                         </div>
-                        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Salva</button>
+                        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:opacity-90 transition-all">Salva</button>
                     </form>
                 </div>
             </aside>
@@ -353,7 +378,7 @@
     </div>
 
     <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 px-8 py-4 text-[8px] text-slate-400 flex justify-between items-center z-50 no-export">
-        <span class="font-bold uppercase tracking-widest">Data & Scadenziario Operativo</span>
+        <span id="footer-info" class="font-bold uppercase tracking-widest">Sincronizzazione in corso...</span>
         <span class="font-black text-slate-800 uppercase tracking-widest">CSR Strategic Hub © 2026</span>
     </footer>
 
