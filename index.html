@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Executive Report</title>
+    <title>CSR Strategic Hub - Executive Dashboard</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -28,7 +28,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        Chart.register(ChartDataLabels); // Attivazione plugin etichette
+        Chart.register(ChartDataLabels);
 
         let userProfile = JSON.parse(localStorage.getItem('csr_user_profile')) || null;
         let initiatives = [];
@@ -41,144 +41,44 @@
             "Salute e Inclusione": "#d97706"
         };
 
-        // --- PDF DOWNLOAD CON FIX OVERLAP & RENDERING ---
+        // --- EXPORT CSV ---
+        window.exportToExcel = () => {
+            if (initiatives.length === 0) return alert("Nessun dato");
+            let csv = "\uFEFFIniziativa,Area,Data,Ciclo,Valore,Unita,Descrizione,Alert,Autore\n";
+            initiatives.forEach(i => {
+                const cleanDesc = i.descrizione ? i.descrizione.replace(/\n/g, " ").replace(/"/g, '""') : "";
+                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.frequenza}","${i.kpi_valore}","${i.kpi_unita}","${cleanDesc}","${i.alert_attivo ? 'SI' : 'NO'}","${i.autore}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `Export_CSR_${new Date().toLocaleDateString()}.csv`;
+            link.click();
+        };
+
+        // --- DOWNLOAD PDF ---
         window.downloadPDF = async () => {
             const element = document.getElementById('report-container');
             const opt = {
                 margin: [10, 5],
-                filename: `Report_CSR_Executive_${new Date().getFullYear()}.pdf`,
+                filename: `Report_CSR_${new Date().getFullYear()}.pdf`,
                 image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { 
-                    scale: 2, 
-                    useCORS: true, 
-                    logging: false,
-                    letterRendering: true,
-                    scrollY: 0
-                },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
             };
-
-            // Nascondi elementi UI prima del render
-            document.querySelectorAll('.no-export').forEach(el => el.style.display = 'none');
-            
-            try {
-                await html2pdf().set(opt).from(element).save();
-            } finally {
-                document.querySelectorAll('.no-export').forEach(el => el.style.display = '');
-            }
+            document.querySelectorAll('.no-export').forEach(el => el.style.visibility = 'hidden');
+            await html2pdf().set(opt).from(element).save();
+            document.querySelectorAll('.no-export').forEach(el => el.style.visibility = 'visible');
         };
 
-        // --- RENDER DOUGHNUT CON PERCENTUALI & TOTALI ---
-        function renderDoughnut() {
-            const stats = initiatives.reduce((acc, curr) => { 
-                acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; 
-                return acc; 
-            }, {});
-            
-            const totalInterventions = initiatives.length;
-            document.getElementById('center-total').innerText = totalInterventions;
-
-            const ctx = document.getElementById('chart-doughnut').getContext('2d');
-            if(charts.doughnut) charts.doughnut.destroy();
-            
-            charts.doughnut = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: Object.keys(stats),
-                    datasets: [{
-                        data: Object.values(stats),
-                        backgroundColor: Object.keys(stats).map(c => categoryColors[c]),
-                        borderWidth: 0
-                    }]
-                },
-                options: {
-                    maintainAspectRatio: false,
-                    cutout: '70%',
-                    plugins: {
-                        legend: { display: false },
-                        datalabels: {
-                            color: '#fff',
-                            font: { weight: 'bold', size: 10 },
-                            formatter: (value, ctx) => {
-                                let sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
-                                return Math.round((value * 100) / sum) + "%";
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        // --- RENDER KPI HIGHLIGHTS ---
-        function renderImpactCards() {
-            const container = document.getElementById('impact-highlights');
-            const totals = initiatives.reduce((acc, curr) => {
-                const key = curr.kpi_unita.toUpperCase();
-                if (!acc[key]) acc[key] = { val: 0, cat: curr.categoria };
-                acc[key].val += curr.kpi_valore;
-                return acc;
-            }, {});
-
-            container.innerHTML = Object.entries(totals).slice(0, 3).map(([unit, data]) => `
-                <div class="impact-card bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impact Goal</p>
-                    <div class="flex items-baseline gap-1">
-                        <span class="text-2xl font-black text-slate-900">${data.val.toLocaleString()}</span>
-                        <span class="text-[10px] font-bold text-slate-500">${unit}</span>
-                    </div>
-                    <div class="mt-3 py-1 px-3 rounded-lg inline-flex items-center gap-2" style="background: ${categoryColors[data.cat]}15">
-                        <span class="w-1.5 h-1.5 rounded-full" style="background:${categoryColors[data.cat]}"></span>
-                        <span class="text-[8px] font-black uppercase" style="color:${categoryColors[data.cat]}">${data.cat}</span>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        // --- RENDER TABELLA (FIX TRONCAMENTO & ALLINEAMENTO) ---
-        function renderTable() {
-            const tbody = document.getElementById('table-body');
-            tbody.innerHTML = initiatives.map(item => `
-                <tr class="border-b border-slate-100">
-                    <td class="p-4 w-1/3">
-                        <div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div>
-                        <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">${item.descrizione || ''}</div>
-                    </td>
-                    <td class="p-4">
-                        <div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white text-center min-w-[140px] whitespace-nowrap shadow-sm" 
-                             style="background:${categoryColors[item.categoria]};">
-                            ${item.categoria.toUpperCase()}
-                        </div>
-                    </td>
-                    <td class="p-4 text-[9px] font-bold text-slate-500 text-center uppercase">${item.frequenza}</td>
-                    <td class="p-4 text-right">
-                        <div class="text-xs font-black text-slate-800">${item.kpi_valore.toLocaleString()} ${item.kpi_unita}</div>
-                        <div class="text-[8px] text-emerald-600 font-bold uppercase mt-0.5">Certificato</div>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        // --- DASHBOARD CORE ---
-        function showDashboard() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('main-dashboard').classList.remove('hidden');
-            onSnapshot(query(collection(db, 'iniziative'), orderBy('timestamp', 'desc')), (snap) => {
-                initiatives = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                renderImpactCards();
-                renderTable();
-                renderDoughnut();
-                renderComparisonChart();
-            });
-        }
-
+        // --- RENDER KPI & TREND (CON VALORI IN ALTO) ---
         function renderComparisonChart() {
             const groups = initiatives.reduce((acc, curr) => { const u = curr.kpi_unita; if (!acc[u]) acc[u] = []; acc[u].push(curr); return acc; }, {});
-            const units = Object.keys(groups).filter(u => groups[u].length >= 2);
+            const units = Object.keys(groups).filter(u => groups[u].length >= 1);
             if (units.length === 0) return;
             const activeUnit = units[currentUnitIndex % units.length];
             const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
-            document.getElementById('current-kpi-label').innerText = `TREND: ${activeUnit.toUpperCase()}`;
+            document.getElementById('current-kpi-label').innerText = `Dati espressi in: ${activeUnit.toUpperCase()}`;
             
             const ctx = document.getElementById('chart-comparison').getContext('2d');
             if(charts.bar) charts.bar.destroy();
@@ -189,17 +89,76 @@
                     datasets: [{ 
                         data: dataSet.map(i => i.kpi_valore), 
                         backgroundColor: dataSet.map(i => categoryColors[i.categoria]),
-                        borderRadius: 6 
+                        borderRadius: 8
                     }]
                 },
                 options: { 
                     maintainAspectRatio: false, 
+                    layout: { padding: { top: 30 } }, // Spazio per le label in alto
                     plugins: { 
                         legend: { display: false },
-                        datalabels: { anchor: 'end', align: 'top', font: { size: 9, weight: 'bold' } }
+                        datalabels: { 
+                            anchor: 'end', 
+                            align: 'top', 
+                            offset: 4,
+                            color: '#1e293b',
+                            font: { weight: 'bold', size: 10 }
+                        }
                     },
-                    scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 8 } } } }
+                    scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 9 } } } }
                 }
+            });
+        }
+
+        // --- CORE UI UPDATE ---
+        function updateUI() {
+            // Highlights
+            const totals = initiatives.reduce((acc, curr) => {
+                const key = curr.kpi_unita.toUpperCase();
+                if (!acc[key]) acc[key] = { val: 0, cat: curr.categoria };
+                acc[key].val += curr.kpi_valore;
+                return acc;
+            }, {});
+            document.getElementById('impact-highlights').innerHTML = Object.entries(totals).slice(0, 3).map(([unit, data]) => `
+                <div class="impact-card bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impact Goal</p>
+                    <div class="flex items-baseline gap-1"><span class="text-2xl font-black text-slate-900">${data.val.toLocaleString()}</span><span class="text-[10px] font-bold text-slate-500">${unit}</span></div>
+                    <div class="mt-3 py-1 px-3 rounded-lg inline-flex items-center gap-2" style="background: ${categoryColors[data.cat]}15"><span class="w-1.5 h-1.5 rounded-full" style="background:${categoryColors[data.cat]}"></span><span class="text-[8px] font-black uppercase" style="color:${categoryColors[data.cat]}">${data.cat}</span></div>
+                </div>`).join('');
+
+            // Table
+            document.getElementById('table-body').innerHTML = initiatives.map(item => `
+                <tr class="border-b border-slate-100">
+                    <td class="p-4 w-1/3"><div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div><div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">${item.descrizione || ''}</div></td>
+                    <td class="p-4"><div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white text-center min-w-[140px]" style="background:${categoryColors[item.categoria]};">${item.categoria.toUpperCase()}</div></td>
+                    <td class="p-4 text-center font-bold text-[9px] text-slate-500 uppercase">${item.frequenza}</td>
+                    <td class="p-4 text-right">
+                        <div class="text-xs font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div>
+                        ${item.alert_attivo ? '<div class="text-[8px] text-amber-600 font-bold uppercase mt-1 italic">⚠️ Scadenza Attiva</div>' : '<div class="text-[8px] text-emerald-600 font-bold uppercase mt-1">✓ Certificato</div>'}
+                    </td>
+                </tr>`).join('');
+
+            // Footer info
+            const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated?.seconds - a.last_updated?.seconds);
+            if (sorted.length > 0) {
+                const last = sorted[0].last_updated.toDate();
+                document.getElementById('footer-info').innerText = `Ultimo salvataggio: ${last.toLocaleDateString()} ${last.toLocaleTimeString()} | Operatore: ${sorted[0].autore}`;
+            }
+
+            renderDoughnut();
+            renderComparisonChart();
+        }
+
+        // --- RESTO LOGICA (Invariata) ---
+        function renderDoughnut() {
+            const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
+            document.getElementById('center-total').innerText = initiatives.length;
+            const ctx = document.getElementById('chart-doughnut').getContext('2d');
+            if(charts.doughnut) charts.doughnut.destroy();
+            charts.doughnut = new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: Object.keys(stats), datasets: [{ data: Object.values(stats), backgroundColor: Object.keys(stats).map(c => categoryColors[c]), borderWidth: 0 }] },
+                options: { maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, datalabels: { color: '#fff', font: { weight: 'bold', size: 10 }, formatter: (v, c) => Math.round((v * 100) / c.dataset.data.reduce((a,b) => a+b, 0)) + "%" } } }
             });
         }
 
@@ -213,6 +172,7 @@
                 kpi_unita: document.getElementById('kpi_unita').value,
                 data_evento: document.getElementById('data_evento').value,
                 frequenza: document.getElementById('frequenza').value,
+                alert_attivo: document.getElementById('alert_attivo').checked,
                 autore: userProfile.name,
                 timestamp: serverTimestamp(),
                 last_updated: serverTimestamp()
@@ -226,10 +186,20 @@
             userProfile = { name: document.getElementById('login-name').value };
             localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
             await signInAnonymously(auth);
-            showDashboard();
+            location.reload();
         };
 
-        window.onload = () => { if(userProfile) showDashboard(); else document.getElementById('login-screen').classList.remove('hidden'); };
+        window.onload = () => {
+            if(userProfile) {
+                document.getElementById('main-dashboard').classList.remove('hidden');
+                onSnapshot(query(collection(db, 'iniziative'), orderBy('timestamp', 'desc')), (snap) => {
+                    initiatives = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    updateUI();
+                });
+            } else {
+                document.getElementById('login-screen').classList.remove('hidden');
+            }
+        };
         window.changeChart = (dir) => { currentUnitIndex += dir; renderComparisonChart(); };
     </script>
     
@@ -237,25 +207,18 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Lora:ital@0;1&display=swap');
         body { font-family: 'Inter', sans-serif; background: #fcfcfd; }
         .font-serif { font-family: 'Lora', serif; }
-        
-        /* FIX SOVRAPPOSIZIONE PDF */
-        #report-container section { margin-bottom: 40px; page-break-inside: avoid; }
-        .table-container { margin-top: 50px; } /* Buffer tra grafici e tabella */
-
-        @media print {
-            .no-export { display: none !important; }
-            .impact-card { border: 1px solid #eee !important; box-shadow: none !important; }
-        }
+        .table-container { margin-top: 50px; }
+        @media print { .no-export { display: none !important; } }
     </style>
 </head>
-<body class="p-0 m-0">
+<body class="pb-20">
 
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/10 backdrop-blur-md hidden">
         <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center border border-slate-100">
             <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" placeholder="Tuo Nome" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
-                <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Accedi</button>
+                <input type="text" id="login-name" placeholder="Nome Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
+                <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl">Entra</button>
             </form>
         </div>
     </div>
@@ -263,9 +226,7 @@
     <div id="main-dashboard" class="hidden">
         <nav class="bg-white/80 backdrop-blur-md border-b border-slate-100 p-6 flex justify-between items-center sticky top-0 z-40 no-export">
             <span class="font-black text-xs tracking-[0.3em] uppercase">CSR Strategic Hub</span>
-            <div class="flex gap-4">
-                <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Scarica Report PDF</button>
-            </div>
+            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Scarica Report PDF</button>
         </nav>
 
         <main class="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
@@ -273,13 +234,13 @@
             <div id="report-container" class="lg:col-span-8 space-y-12">
                 
                 <section>
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Executive Impact Summary</h3>
+                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Key Performance Indicators</h3>
                     <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
                 </section>
 
                 <section class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative h-72">
-                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Volume Interventi</h4>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Volume Attività</h4>
                         <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-6">
                             <span id="center-total" class="text-3xl font-black text-slate-900">0</span>
                             <span class="text-[8px] font-bold text-slate-400 uppercase">Totali</span>
@@ -294,20 +255,21 @@
                                 <button onclick="changeChart(1)" class="p-1 bg-slate-50 rounded">▶</button>
                             </div>
                         </div>
-                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-4">--</h5>
+                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-2">--</h5>
                         <div class="flex-grow"><canvas id="chart-comparison"></canvas></div>
                     </div>
                 </section>
 
                 <section class="table-container bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-                    <div class="p-8 border-b border-slate-50">
-                        <h3 class="font-black text-sm tracking-tighter">Registro Dettagliato delle Attività</h3>
+                    <div class="p-8 border-b border-slate-50 flex justify-between items-center">
+                        <h3 class="font-black text-sm tracking-tighter uppercase">Registro Dettagliato delle Attività</h3>
+                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors">Export CSV</button>
                     </div>
                     <table class="w-full text-left">
                         <thead class="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                             <tr>
                                 <th class="p-5">Iniziativa & Storytelling</th>
-                                <th class="p-5 text-center">Pilastro Strategico</th>
+                                <th class="p-5 text-center">Pilastro</th>
                                 <th class="p-5 text-center">Ciclo</th>
                                 <th class="p-5 text-right">Impatto</th>
                             </tr>
@@ -319,15 +281,15 @@
 
             <aside class="lg:col-span-4 no-export">
                 <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-32">
-                    <h3 class="font-black text-lg mb-6 tracking-tighter">Nuova Voce</h3>
+                    <h3 class="font-black text-lg mb-6 tracking-tighter">Registrazione</h3>
                     <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
-                        <input type="text" id="nome_iniziativa" placeholder="Titolo" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-slate-900">
+                        <input type="text" id="nome_iniziativa" placeholder="Titolo" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
                         <select id="categoria" class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
                             <option>Comunità e Ambiente</option>
                             <option>Educazione e Giovani</option>
                             <option>Salute e Inclusione</option>
                         </select>
-                        <textarea id="descrizione" placeholder="Descrizione breve..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none focus:ring-2 focus:ring-slate-900"></textarea>
+                        <textarea id="descrizione" placeholder="Descrizione dell'impatto..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none"></textarea>
                         <div class="flex gap-2">
                             <input type="number" id="kpi_valore" placeholder="Valore" required class="w-2/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
                             <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
@@ -338,12 +300,21 @@
                                 <option>Mensile</option><option>Trimestrale</option><option>Annuale</option>
                             </select>
                         </div>
-                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all">Registra</button>
+                        <div class="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                            <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-amber-600">
+                            <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Attiva Alert Scadenza</label>
+                        </div>
+                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all">Salva Dati</button>
                     </form>
                 </div>
             </aside>
         </main>
     </div>
+
+    <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 px-8 py-4 text-[9px] text-slate-400 flex justify-between items-center z-50 no-export">
+        <span id="footer-info" class="font-bold uppercase tracking-widest">Sincronizzazione in corso...</span>
+        <span class="font-black text-slate-800 uppercase tracking-widest">CSR Strategic Hub © 2026</span>
+    </footer>
 
 </body>
 </html>
