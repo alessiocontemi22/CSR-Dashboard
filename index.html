@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Intelligence v3.2</title>
+    <title>CSR Strategic Hub - Intelligence v3.3</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -12,8 +12,8 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
@@ -42,30 +42,34 @@
         };
 
         const formatDate = (d) => d ? d.split('-').reverse().join('/') : '--';
-        
-        const getCountdown = (dateString) => {
-            const target = new Date(dateString);
+
+        // --- LOGICA DI CALCOLO SCADENZA ---
+        const getExpiryStatus = (item, allInitiatives) => {
+            // 1. Controlla se esiste un'iniziativa con lo stesso nome più recente
+            const hasNewer = allInitiatives.some(i => 
+                i.nome_iniziativa === item.nome_iniziativa && 
+                new Date(i.data_evento) > new Date(item.data_evento)
+            );
+
+            if (hasNewer) return `<span class="text-emerald-600 font-bold text-[7px] uppercase tracking-tighter italic">Rinnovata</span>`;
+            if (!item.alert_attivo) return "";
+
+            // 2. Calcola la prossima scadenza in base alla frequenza
+            const eventDate = new Date(item.data_evento);
+            let nextDue = new Date(eventDate);
+
+            if (item.frequenza === "Mensile") nextDue.setMonth(nextDue.getMonth() + 1);
+            else if (item.frequenza === "Trimestrale") nextDue.setMonth(nextDue.getMonth() + 3);
+            else if (item.frequenza === "Annuale") nextDue.setFullYear(nextDue.getFullYear() + 1);
+            else return ""; // Evento singolo non scade
+
             const today = new Date();
             today.setHours(0,0,0,0);
-            const diffTime = target - today;
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            if (diffDays < 0) return `<span class="text-rose-600 font-black uppercase text-[7px]">Rinnovare (da ${Math.abs(diffDays)}g)</span>`;
-            if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px]">RINNOVA OGGI</span>`;
-            return `<span class="text-amber-600 text-[7px]">Scade tra ${diffDays}g</span>`;
-        };
+            const diffDays = Math.ceil((nextDue - today) / (1000 * 60 * 60 * 24));
 
-        // --- EXPORT CSV ---
-        window.exportToExcel = () => {
-            let csv = "\uFEFFIniziativa,Area,Data,Ciclo,Valore,Unita,Descrizione,Alert,Autore\n";
-            initiatives.forEach(i => {
-                const cleanDesc = i.descrizione ? i.descrizione.replace(/\n/g, " ").replace(/"/g, '""') : "";
-                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.frequenza}","${i.kpi_valore}","${i.kpi_unita}","${cleanDesc}","${i.alert_attivo ? 'SI' : 'NO'}","${i.autore}"\n`;
-            });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `Export_CSR_${new Date().toLocaleDateString()}.csv`;
-            link.click();
+            if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase">Scaduta da ${Math.abs(diffDays)}g</span>`;
+            if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px] uppercase">Scade Oggi</span>`;
+            return `<span class="text-amber-600 font-bold text-[7px] uppercase tracking-tighter">Scade tra ${diffDays}g</span>`;
         };
 
         // --- DOWNLOAD PDF ---
@@ -83,13 +87,22 @@
             document.querySelectorAll('.no-export').forEach(el => el.style.visibility = 'visible');
         };
 
-        // --- GRAFICO GROWTH TREND (History) ---
+        // --- EXPORT CSV ---
+        window.exportToExcel = () => {
+            let csv = "\uFEFFIniziativa,Area,Data,Ciclo,Valore,Unita,Descrizione,Autore\n";
+            initiatives.forEach(i => {
+                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.frequenza}","${i.kpi_valore}","${i.kpi_unita}","${(i.descrizione||'').replace(/"/g,'""')}","${i.autore}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `Export_CSR_${new Date().toLocaleDateString()}.csv`;
+            link.click();
+        };
+
+        // --- GRAFICI ---
         function renderComparisonChart() {
-            const nameCounts = initiatives.reduce((acc, curr) => { 
-                acc[curr.nome_iniziativa] = (acc[curr.nome_iniziativa] || 0) + 1; 
-                return acc; 
-            }, {});
-            
+            const nameCounts = initiatives.reduce((acc, curr) => { acc[curr.nome_iniziativa] = (acc[curr.nome_iniziativa] || 0) + 1; return acc; }, {});
             const repeated = initiatives.filter(i => nameCounts[i.nome_iniziativa] > 1);
             const groups = repeated.reduce((acc, curr) => { 
                 const u = curr.kpi_unita.toUpperCase(); 
@@ -100,14 +113,11 @@
 
             const units = Object.keys(groups);
             const container = document.getElementById('chart-bar-container');
-            
             if (units.length === 0) {
-                container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10 leading-relaxed">Inserisci più record per la stessa attività (es. "Baskin" con date diverse) per attivare il confronto storico.</div>`;
+                container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10">Inserisci rinnovi per attivare il trend.</div>`;
                 return;
-            } else {
-                container.innerHTML = `<canvas id="chart-comparison"></canvas>`;
             }
-
+            container.innerHTML = `<canvas id="chart-comparison"></canvas>`;
             const activeUnit = units[currentUnitIndex % units.length];
             const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
             document.getElementById('current-kpi-label').innerText = `STORICO KPI: ${activeUnit}`;
@@ -118,33 +128,19 @@
                 type: 'bar',
                 data: {
                     labels: dataSet.map(i => [i.nome_iniziativa, `(${formatDate(i.data_evento)})`]),
-                    datasets: [{ 
-                        data: dataSet.map(i => i.kpi_valore), 
-                        backgroundColor: dataSet.map(i => categoryColors[i.categoria]),
-                        borderRadius: 6
-                    }]
+                    datasets: [{ data: dataSet.map(i => i.kpi_valore), backgroundColor: dataSet.map(i => categoryColors[i.categoria]), borderRadius: 6 }]
                 },
                 options: { 
                     maintainAspectRatio: false, 
                     layout: { padding: { top: 35 } },
-                    plugins: { 
-                        legend: { display: false },
-                        datalabels: { 
-                            anchor: 'end', align: 'top', offset: 2,
-                            color: '#1e293b', font: { weight: 'black', size: 10 }
-                        }
-                    },
-                    scales: { 
-                        y: { display: false }, 
-                        x: { grid: { display: false }, ticks: { font: { size: 8, weight: 'bold' } } } 
-                    }
+                    plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'top', offset: 2, color: '#1e293b', font: { weight: 'black', size: 10 } } },
+                    scales: { y: { display: false }, x: { grid: { display: false }, ticks: { font: { size: 8, weight: 'bold' } } } }
                 }
             });
         }
 
-        // --- UPDATE UI COMPLETA ---
         function updateUI() {
-            // 1. HIGHLIGHTS (Basati su tutti i dati)
+            // Highlights
             const totals = initiatives.reduce((acc, curr) => {
                 const key = curr.kpi_unita.toUpperCase();
                 if (!acc[key]) acc[key] = { val: 0, cat: curr.categoria };
@@ -158,44 +154,35 @@
                     <div class="mt-3 py-1 px-3 rounded-lg inline-flex items-center gap-2" style="background: ${categoryColors[data.cat]}15"><span class="w-1.5 h-1.5 rounded-full" style="background:${categoryColors[data.cat]}"></span><span class="text-[8px] font-black uppercase" style="color:${categoryColors[data.cat]}">${data.cat}</span></div>
                 </div>`).join('');
 
-            // 2. LOGICA DEDUPLICAZIONE PER TABELLA (Solo l'ultima data per ogni nome)
-            const latestOnlyMap = initiatives.reduce((acc, curr) => {
-                if (!acc[curr.nome_iniziativa] || new Date(curr.data_evento) > new Date(acc[curr.nome_iniziativa].data_evento)) {
-                    acc[curr.nome_iniziativa] = curr;
-                }
-                return acc;
-            }, {});
-            const tableData = Object.values(latestOnlyMap).sort((a,b) => new Date(b.data_evento) - new Date(a.data_evento));
-
-            // 3. RENDER TABELLA
-            document.getElementById('table-body').innerHTML = tableData.map(item => `
+            // Tabella con Logica "Rinnovi" e "Countdown"
+            document.getElementById('table-body').innerHTML = initiatives.map(item => `
                 <tr class="border-b border-slate-100">
                     <td class="p-4 w-1/3">
                         <div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div>
                         <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">
-                            <span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione || 'Nessuna descrizione.'}
+                            <span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione || '...'}
                         </div>
                     </td>
                     <td class="p-4"><div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white text-center min-w-[140px]" style="background:${categoryColors[item.categoria]};">${item.categoria.toUpperCase()}</div></td>
                     <td class="p-4 text-center font-bold text-[9px] text-slate-500 uppercase">${item.frequenza}</td>
                     <td class="p-4 text-right">
                         <div class="text-xs font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div>
-                        <div class="mt-1">${item.alert_attivo ? getCountdown(item.data_evento) : ''}</div>
+                        <div class="mt-1">${getExpiryStatus(item, initiatives)}</div>
                     </td>
                 </tr>`).join('');
 
-            // 4. FOOTER
+            // Footer
             const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated?.seconds - a.last_updated?.seconds);
             if (sorted.length > 0) {
                 const last = sorted[0].last_updated.toDate();
-                document.getElementById('footer-info').innerText = `Sync: ${last.toLocaleDateString()} ${last.toLocaleTimeString()} | Operatore: ${sorted[0].autore}`;
+                document.getElementById('footer-info').innerText = `SYNC: ${last.toLocaleDateString()} ${last.toLocaleTimeString()} | OPERATORE: ${sorted[0].autore}`;
             }
 
             renderDoughnut();
             renderComparisonChart();
         }
 
-        // --- RESTO LOGICA ---
+        // --- DASHBOARD CORE ---
         function renderDoughnut() {
             const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
             document.getElementById('center-total').innerText = initiatives.length;
@@ -246,7 +233,7 @@
                 document.getElementById('login-screen').classList.remove('hidden');
             }
         };
-        window.changeChart = (dir) => { currentUnitIndex += 1; renderComparisonChart(); };
+        window.changeChart = (dir) => { currentUnitIndex += dir; renderComparisonChart(); };
     </script>
     
     <style>
@@ -263,7 +250,7 @@
         <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center border border-slate-100">
             <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" placeholder="Nome Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
+                <input type="text" id="login-name" placeholder="Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
                 <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl">Entra</button>
             </form>
         </div>
@@ -272,7 +259,7 @@
     <div id="main-dashboard" class="hidden">
         <nav class="bg-white/80 backdrop-blur-md border-b border-slate-100 p-6 flex justify-between items-center sticky top-0 z-40 no-export">
             <span class="font-black text-xs tracking-[0.3em] uppercase text-slate-900">CSR Strategic Hub</span>
-            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Esporta Report PDF</button>
+            <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Esporta PDF</button>
         </nav>
 
         <main class="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
@@ -280,23 +267,26 @@
             <div id="report-container" class="lg:col-span-8 space-y-12">
                 
                 <section>
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">KPI Dashboard</h3>
+                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Indicatori di Impatto</h3>
                     <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
                 </section>
 
                 <section class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative h-80">
-                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Focus Aree</h4>
+                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Focus Strategico</h4>
                         <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-6">
                             <span id="center-total" class="text-3xl font-black text-slate-900">0</span>
-                            <span class="text-[8px] font-bold text-slate-400 uppercase">Input</span>
+                            <span class="text-[8px] font-bold text-slate-400 uppercase">Progetti</span>
                         </div>
                         <div class="h-52"><canvas id="chart-doughnut"></canvas></div>
                     </div>
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm h-80 flex flex-col">
                         <div class="flex justify-between items-center no-export">
-                            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Trend Storico</h4>
-                            <button onclick="changeChart(1)" class="p-1.5 bg-slate-50 rounded-lg text-[10px]">🔄 Switch Unità</button>
+                            <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Growth Trend</h4>
+                            <div class="flex gap-1">
+                                <button onclick="changeChart(-1)" class="p-1 bg-slate-50 rounded">◀</button>
+                                <button onclick="changeChart(1)" class="p-1 bg-slate-50 rounded">▶</button>
+                            </div>
                         </div>
                         <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-2">--</h5>
                         <div id="chart-bar-container" class="flex-grow"></div>
@@ -305,16 +295,16 @@
 
                 <section class="table-container bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
                     <div class="p-8 border-b border-slate-50 flex justify-between items-center">
-                        <h3 class="font-black text-xs tracking-tighter uppercase">Registro Attività (Stato Attuale)</h3>
-                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-colors">Scarica CSV</button>
+                        <h3 class="font-black text-xs tracking-tighter uppercase text-slate-900">Registro Attività e Scadenziario</h3>
+                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100">Scarica CSV</button>
                     </div>
                     <table class="w-full text-left">
                         <thead class="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
                             <tr>
-                                <th class="p-5">Iniziativa & Data</th>
+                                <th class="p-5">Iniziativa & Storytelling</th>
                                 <th class="p-5 text-center">Pilastro</th>
-                                <th class="p-5 text-center">Ciclo</th>
-                                <th class="p-5 text-right">Dato KPI</th>
+                                <th class="p-5 text-center">Frequenza</th>
+                                <th class="p-5 text-right">KPI & Scadenza</th>
                             </tr>
                         </thead>
                         <tbody id="table-body" class="divide-y divide-slate-100"></tbody>
@@ -324,15 +314,15 @@
 
             <aside class="lg:col-span-4 no-export">
                 <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-32">
-                    <h3 class="font-black text-lg mb-6 tracking-tighter text-slate-800">Nuovo Record</h3>
+                    <h3 class="font-black text-lg mb-6 tracking-tighter text-slate-800">Registra Attività</h3>
                     <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
-                        <input type="text" id="nome_iniziativa" placeholder="Nome Attività (es: Baskin)" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
+                        <input type="text" id="nome_iniziativa" placeholder="Nome Attività" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-slate-900">
                         <select id="categoria" class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
                             <option>Comunità e Ambiente</option>
                             <option>Educazione e Giovani</option>
                             <option>Salute e Inclusione</option>
                         </select>
-                        <textarea id="descrizione" placeholder="Narrazione impatto..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none"></textarea>
+                        <textarea id="descrizione" placeholder="Descrizione dell'impatto..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none"></textarea>
                         <div class="flex gap-2">
                             <input type="number" id="kpi_valore" placeholder="Valore" required class="w-2/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
                             <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
@@ -347,7 +337,7 @@
                             <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-amber-600">
                             <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Pianifica Rinnovo</label>
                         </div>
-                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800 transition-all">Registra</button>
+                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800">Salva</button>
                     </form>
                 </div>
             </aside>
@@ -355,7 +345,7 @@
     </div>
 
     <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 px-8 py-4 text-[8px] text-slate-400 flex justify-between items-center z-50 no-export">
-        <span id="footer-info" class="font-bold uppercase tracking-widest">In attesa...</span>
+        <span id="footer-info" class="font-bold uppercase tracking-widest">Database Sincronizzato</span>
         <span class="font-black text-slate-800 uppercase tracking-widest">CSR Strategic Hub © 2026</span>
     </footer>
 
