@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CSR Strategic Hub - Intelligence v3.3</title>
+    <title>CSR Strategic Hub - Intelligence v3.4</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -13,7 +13,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
@@ -34,6 +34,7 @@
         let initiatives = [];
         let charts = { doughnut: null, bar: null };
         let currentUnitIndex = 0;
+        let editingId = null; // Stato per la modifica
 
         const categoryColors = {
             "Comunità e Ambiente": "#059669",
@@ -43,61 +44,87 @@
 
         const formatDate = (d) => d ? d.split('-').reverse().join('/') : '--';
 
-        // --- LOGICA DI CALCOLO SCADENZA ---
+        // --- CALCOLO SCADENZA DINAMICO ---
         const getExpiryStatus = (item, allInitiatives) => {
-            // 1. Controlla se esiste un'iniziativa con lo stesso nome più recente
             const hasNewer = allInitiatives.some(i => 
                 i.nome_iniziativa === item.nome_iniziativa && 
                 new Date(i.data_evento) > new Date(item.data_evento)
             );
 
-            if (hasNewer) return `<span class="text-emerald-600 font-bold text-[7px] uppercase tracking-tighter italic">Rinnovata</span>`;
+            if (hasNewer) return `<span class="text-emerald-600 font-bold text-[7px] uppercase italic">Rinnovata</span>`;
             if (!item.alert_attivo) return "";
 
-            // 2. Calcola la prossima scadenza in base alla frequenza
             const eventDate = new Date(item.data_evento);
             let nextDue = new Date(eventDate);
-
             if (item.frequenza === "Mensile") nextDue.setMonth(nextDue.getMonth() + 1);
             else if (item.frequenza === "Trimestrale") nextDue.setMonth(nextDue.getMonth() + 3);
             else if (item.frequenza === "Annuale") nextDue.setFullYear(nextDue.getFullYear() + 1);
-            else return ""; // Evento singolo non scade
+            else return "";
 
             const today = new Date();
             today.setHours(0,0,0,0);
             const diffDays = Math.ceil((nextDue - today) / (1000 * 60 * 60 * 24));
 
-            if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase">Scaduta da ${Math.abs(diffDays)}g</span>`;
+            if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase tracking-tighter">Scaduta da ${Math.abs(diffDays)}g</span>`;
             if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px] uppercase">Scade Oggi</span>`;
             return `<span class="text-amber-600 font-bold text-[7px] uppercase tracking-tighter">Scade tra ${diffDays}g</span>`;
         };
 
-        // --- DOWNLOAD PDF ---
-        window.downloadPDF = async () => {
-            const element = document.getElementById('report-container');
-            const opt = {
-                margin: [10, 5],
-                filename: `Report_CSR_${new Date().getFullYear()}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2, useCORS: true, scrollY: 0 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
-            document.querySelectorAll('.no-export').forEach(el => el.style.visibility = 'hidden');
-            await html2pdf().set(opt).from(element).save();
-            document.querySelectorAll('.no-export').forEach(el => el.style.visibility = 'visible');
+        // --- AZIONI CRUD ---
+        window.deleteInitiative = async (id) => {
+            if(confirm("Eliminare definitivamente questo record?")) {
+                await deleteDoc(doc(db, "iniziative", id));
+            }
         };
 
-        // --- EXPORT CSV ---
-        window.exportToExcel = () => {
-            let csv = "\uFEFFIniziativa,Area,Data,Ciclo,Valore,Unita,Descrizione,Autore\n";
-            initiatives.forEach(i => {
-                csv += `"${i.nome_iniziativa}","${i.categoria}","${i.data_evento}","${i.frequenza}","${i.kpi_valore}","${i.kpi_unita}","${(i.descrizione||'').replace(/"/g,'""')}","${i.autore}"\n`;
-            });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `Export_CSR_${new Date().toLocaleDateString()}.csv`;
-            link.click();
+        window.editInitiative = (id) => {
+            const item = initiatives.find(i => i.id === id);
+            if(!item) return;
+
+            editingId = id;
+            document.getElementById('nome_iniziativa').value = item.nome_iniziativa;
+            document.getElementById('categoria').value = item.categoria;
+            document.getElementById('descrizione').value = item.descrizione;
+            document.getElementById('kpi_valore').value = item.kpi_valore;
+            document.getElementById('kpi_unita').value = item.kpi_unita;
+            document.getElementById('data_evento').value = item.data_evento;
+            document.getElementById('frequenza').value = item.frequenza;
+            document.getElementById('alert_attivo').checked = item.alert_attivo;
+
+            const btn = document.getElementById('submit-btn');
+            btn.innerText = "Aggiorna Record";
+            btn.classList.replace('bg-slate-900', 'bg-blue-600');
+            document.getElementById('form-title').innerText = "Modifica Record";
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        window.saveInitiative = async (e) => {
+            e.preventDefault();
+            const payload = {
+                nome_iniziativa: document.getElementById('nome_iniziativa').value,
+                categoria: document.getElementById('categoria').value,
+                descrizione: document.getElementById('descrizione').value,
+                kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
+                kpi_unita: document.getElementById('kpi_unita').value,
+                data_evento: document.getElementById('data_evento').value,
+                frequenza: document.getElementById('frequenza').value,
+                alert_attivo: document.getElementById('alert_attivo').checked,
+                autore: userProfile.name,
+                last_updated: serverTimestamp()
+            };
+
+            if (editingId) {
+                await updateDoc(doc(db, "iniziative", editingId), payload);
+                editingId = null;
+                const btn = document.getElementById('submit-btn');
+                btn.innerText = "Salva";
+                btn.classList.replace('bg-blue-600', 'bg-slate-900');
+                document.getElementById('form-title').innerText = "Registra Attività";
+            } else {
+                payload.timestamp = serverTimestamp();
+                await addDoc(collection(db, 'iniziative'), payload);
+            }
+            e.target.reset();
         };
 
         // --- GRAFICI ---
@@ -154,11 +181,17 @@
                     <div class="mt-3 py-1 px-3 rounded-lg inline-flex items-center gap-2" style="background: ${categoryColors[data.cat]}15"><span class="w-1.5 h-1.5 rounded-full" style="background:${categoryColors[data.cat]}"></span><span class="text-[8px] font-black uppercase" style="color:${categoryColors[data.cat]}">${data.cat}</span></div>
                 </div>`).join('');
 
-            // Tabella con Logica "Rinnovi" e "Countdown"
+            // Tabella
             document.getElementById('table-body').innerHTML = initiatives.map(item => `
-                <tr class="border-b border-slate-100">
+                <tr class="border-b border-slate-100 group">
                     <td class="p-4 w-1/3">
-                        <div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div>
+                        <div class="flex items-center gap-2">
+                            <div class="font-bold text-slate-900 text-xs">${item.nome_iniziativa}</div>
+                            <div class="hidden group-hover:flex gap-1 no-export">
+                                <button onclick="editInitiative('${item.id}')" class="text-[10px] bg-slate-100 p-1 rounded hover:bg-blue-100 text-blue-600">✏️</button>
+                                <button onclick="deleteInitiative('${item.id}')" class="text-[10px] bg-slate-100 p-1 rounded hover:bg-red-100 text-red-600">🗑️</button>
+                            </div>
+                        </div>
                         <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">
                             <span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione || '...'}
                         </div>
@@ -171,18 +204,10 @@
                     </td>
                 </tr>`).join('');
 
-            // Footer
-            const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated?.seconds - a.last_updated?.seconds);
-            if (sorted.length > 0) {
-                const last = sorted[0].last_updated.toDate();
-                document.getElementById('footer-info').innerText = `SYNC: ${last.toLocaleDateString()} ${last.toLocaleTimeString()} | OPERATORE: ${sorted[0].autore}`;
-            }
-
             renderDoughnut();
             renderComparisonChart();
         }
 
-        // --- DASHBOARD CORE ---
         function renderDoughnut() {
             const stats = initiatives.reduce((acc, curr) => { acc[curr.categoria] = (acc[curr.categoria] || 0) + 1; return acc; }, {});
             document.getElementById('center-total').innerText = initiatives.length;
@@ -194,25 +219,6 @@
                 options: { maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false }, datalabels: { color: '#fff', font: { weight: 'bold', size: 10 }, formatter: (v, c) => Math.round((v * 100) / c.dataset.data.reduce((a,b) => a+b, 0)) + "%" } } }
             });
         }
-
-        window.saveInitiative = async (e) => {
-            e.preventDefault();
-            const payload = {
-                nome_iniziativa: document.getElementById('nome_iniziativa').value,
-                categoria: document.getElementById('categoria').value,
-                descrizione: document.getElementById('descrizione').value,
-                kpi_valore: parseFloat(document.getElementById('kpi_valore').value),
-                kpi_unita: document.getElementById('kpi_unita').value,
-                data_evento: document.getElementById('data_evento').value,
-                frequenza: document.getElementById('frequenza').value,
-                alert_attivo: document.getElementById('alert_attivo').checked,
-                autore: userProfile.name,
-                timestamp: serverTimestamp(),
-                last_updated: serverTimestamp()
-            };
-            await addDoc(collection(db, 'iniziative'), payload);
-            e.target.reset();
-        };
 
         window.handleLogin = async (e) => {
             e.preventDefault();
@@ -233,21 +239,25 @@
                 document.getElementById('login-screen').classList.remove('hidden');
             }
         };
-        window.changeChart = (dir) => { currentUnitIndex += dir; renderComparisonChart(); };
+        window.changeChart = (dir) => { currentUnitIndex += dir; if(currentUnitIndex<0) currentUnitIndex=0; renderComparisonChart(); };
+        window.downloadPDF = async () => {
+            const element = document.getElementById('report-container');
+            const opt = { margin: 10, filename: 'CSR_Report.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+            await html2pdf().set(opt).from(element).save();
+        };
     </script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Lora:ital@0;1&display=swap');
         body { font-family: 'Inter', sans-serif; background: #fcfcfd; }
         .font-serif { font-family: 'Lora', serif; }
-        .table-container { margin-top: 50px; }
         @media print { .no-export { display: none !important; } }
     </style>
 </head>
 <body class="pb-24">
 
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/10 backdrop-blur-md hidden">
-        <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center border border-slate-100">
+        <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center">
             <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
                 <input type="text" id="login-name" placeholder="Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
@@ -265,7 +275,6 @@
         <main class="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
             
             <div id="report-container" class="lg:col-span-8 space-y-12">
-                
                 <section>
                     <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Indicatori di Impatto</h3>
                     <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
@@ -293,10 +302,9 @@
                     </div>
                 </section>
 
-                <section class="table-container bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+                <section class="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
                     <div class="p-8 border-b border-slate-50 flex justify-between items-center">
                         <h3 class="font-black text-xs tracking-tighter uppercase text-slate-900">Registro Attività e Scadenziario</h3>
-                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100">Scarica CSV</button>
                     </div>
                     <table class="w-full text-left">
                         <thead class="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
@@ -314,7 +322,7 @@
 
             <aside class="lg:col-span-4 no-export">
                 <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-32">
-                    <h3 class="font-black text-lg mb-6 tracking-tighter text-slate-800">Registra Attività</h3>
+                    <h3 id="form-title" class="font-black text-lg mb-6 tracking-tighter text-slate-800">Registra Attività</h3>
                     <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
                         <input type="text" id="nome_iniziativa" placeholder="Nome Attività" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-slate-900">
                         <select id="categoria" class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
@@ -337,7 +345,7 @@
                             <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-amber-600">
                             <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Pianifica Rinnovo</label>
                         </div>
-                        <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-800">Salva</button>
+                        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Salva</button>
                     </form>
                 </div>
             </aside>
@@ -345,7 +353,7 @@
     </div>
 
     <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 px-8 py-4 text-[8px] text-slate-400 flex justify-between items-center z-50 no-export">
-        <span id="footer-info" class="font-bold uppercase tracking-widest">Database Sincronizzato</span>
+        <span class="font-bold uppercase tracking-widest">Data & Scadenziario Operativo</span>
         <span class="font-black text-slate-800 uppercase tracking-widest">CSR Strategic Hub © 2026</span>
     </footer>
 
