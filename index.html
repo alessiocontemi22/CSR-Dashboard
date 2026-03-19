@@ -1,48 +1,29 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-   
-    <title>CSR Strategic Hub - Intelligence v3.6</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
-     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-HQV1X5DELN"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
-    
       gtag('config', 'G-HQV1X5DELN');
     </script>
+
+    <script defer src="https://cdn.vercel-insights.com/v1/script.js"></script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSR Strategic Hub - Demo v4.0</title>
     
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, orderBy, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
-
-        const firebaseConfig = {
-            apiKey: "AIzaSyAabpS43j9KDSqJ8V7Vv5PfRvpZ4DvSSEk",
-            authDomain: "csr-dashboard-5e613.firebaseapp.com",
-            projectId: "csr-dashboard-5e613",
-            storageBucket: "csr-dashboard-5e613.firebasestorage.app",
-            messagingSenderId: "662684708122",
-            appId: "1:662684708122:web:6e17a3bd8e31ff18be10a3",
-            measurementId: "G-HQV1X5DELN"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        Chart.register(ChartDataLabels);
-
-        let userProfile = JSON.parse(localStorage.getItem('csr_user_profile')) || null;
-        let initiatives = [];
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <script>
+        // --- LOGICA SESSION-ONLY (Sostituisce Firebase) ---
+        let userProfile = JSON.parse(sessionStorage.getItem('csr_user_profile')) || null;
+        let initiatives = JSON.parse(sessionStorage.getItem('csr_data')) || [];
         let charts = { doughnut: null, bar: null };
         let currentUnitIndex = 0;
         let editingId = null;
@@ -55,41 +36,44 @@
 
         const formatDate = (d) => d ? d.split('-').reverse().join('/') : '--';
 
-        // --- LOGICA SCADENZA DINAMICA ---
+        // Salvataggio in Session Storage
+        const syncSession = () => {
+            sessionStorage.setItem('csr_data', JSON.stringify(initiatives));
+            updateUI();
+        };
+
         const getExpiryStatus = (item, allInitiatives) => {
             const hasNewer = allInitiatives.some(i => 
                 i.nome_iniziativa === item.nome_iniziativa && 
                 new Date(i.data_evento) > new Date(item.data_evento)
             );
-
             if (hasNewer) return `<span class="text-emerald-600 font-bold text-[7px] uppercase italic">Rinnovata</span>`;
             if (!item.alert_attivo) return "";
-
             const eventDate = new Date(item.data_evento);
             let nextDue = new Date(eventDate);
             if (item.frequenza === "Mensile") nextDue.setMonth(nextDue.getMonth() + 1);
             else if (item.frequenza === "Trimestrale") nextDue.setMonth(nextDue.getMonth() + 3);
             else if (item.frequenza === "Annuale") nextDue.setFullYear(nextDue.getFullYear() + 1);
             else return "";
-
             const today = new Date();
             today.setHours(0,0,0,0);
             const diffDays = Math.ceil((nextDue - today) / (1000 * 60 * 60 * 24));
-
             if (diffDays < 0) return `<span class="text-rose-600 font-black text-[7px] uppercase">Scaduta da ${Math.abs(diffDays)}g</span>`;
-            if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px] uppercase tracking-tighter">Scade Oggi</span>`;
+            if (diffDays === 0) return `<span class="text-rose-500 font-black animate-pulse text-[7px] uppercase">Scade Oggi</span>`;
             return `<span class="text-amber-600 font-bold text-[7px] uppercase tracking-tighter">Scade tra ${diffDays}g</span>`;
         };
 
-        // --- AUTH & CRUD ---
-        window.handleLogout = async () => {
-            await signOut(auth);
-            localStorage.removeItem('csr_user_profile');
+        // --- AZIONI CRUD (SESSION) ---
+        window.handleLogout = () => {
+            sessionStorage.clear();
             location.reload();
         };
 
-        window.deleteInitiative = async (id) => {
-            if(confirm("Eliminare definitivamente questo record?")) await deleteDoc(doc(db, "iniziative", id));
+        window.deleteInitiative = (id) => {
+            if(confirm("Eliminare il record dalla sessione?")) {
+                initiatives = initiatives.filter(i => i.id !== id);
+                syncSession();
+            }
         };
 
         window.editInitiative = (id) => {
@@ -106,13 +90,14 @@
             document.getElementById('alert_attivo').checked = item.alert_attivo;
             document.getElementById('submit-btn').innerText = "Aggiorna Record";
             document.getElementById('submit-btn').classList.replace('bg-slate-900', 'bg-blue-600');
-            document.getElementById('form-title').innerText = "Modifica Attività";
             window.scrollTo({ top: 0, behavior: 'smooth' });
         };
 
-        window.saveInitiative = async (e) => {
+        window.saveInitiative = (e) => {
             e.preventDefault();
+            const now = new Date();
             const payload = {
+                id: editingId || Date.now().toString(),
                 nome_iniziativa: document.getElementById('nome_iniziativa').value,
                 categoria: document.getElementById('categoria').value,
                 descrizione: document.getElementById('descrizione').value,
@@ -122,19 +107,23 @@
                 frequenza: document.getElementById('frequenza').value,
                 alert_attivo: document.getElementById('alert_attivo').checked,
                 autore: userProfile.name,
-                last_updated: serverTimestamp()
+                last_updated: now.toISOString()
             };
+
             if (editingId) {
-                await updateDoc(doc(db, "iniziative", editingId), payload);
+                const index = initiatives.findIndex(i => i.id === editingId);
+                initiatives[index] = payload;
                 editingId = null;
                 document.getElementById('submit-btn').innerText = "Salva";
                 document.getElementById('submit-btn').classList.replace('bg-blue-600', 'bg-slate-900');
-                document.getElementById('form-title').innerText = "Registra Attività";
             } else {
-                payload.timestamp = serverTimestamp();
-                await addDoc(collection(db, 'iniziative'), payload);
+                initiatives.unshift(payload);
             }
             e.target.reset();
+            syncSession();
+            
+            // Evento Custom per Analytics (Traccia quando un utente salva un dato nella demo)
+            gtag('event', 'save_initiative', { 'event_category': 'Engagement', 'event_label': payload.categoria });
         };
 
         window.exportToExcel = () => {
@@ -143,17 +132,16 @@
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.download = `Export_CSR_Data.csv`;
+            link.download = `Export_Demo_CSR.csv`;
             link.click();
         };
 
         window.downloadPDF = async () => {
             const element = document.getElementById('report-container');
-            const opt = { margin: 10, filename: 'CSR_Report.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
+            const opt = { margin: 10, filename: 'CSR_Demo_Report.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
             await html2pdf().set(opt).from(element).save();
         };
 
-        // --- DASHBOARD UPDATE ---
         function updateUI() {
             // Highlights
             const totals = initiatives.reduce((acc, curr) => {
@@ -163,8 +151,8 @@
                 return acc;
             }, {});
             document.getElementById('impact-highlights').innerHTML = Object.entries(totals).slice(0, 3).map(([unit, data]) => `
-                <div class="impact-card bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
-                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impact KPI</p>
+                <div class="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
+                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Impact Goal</p>
                     <div class="flex items-baseline gap-1"><span class="text-2xl font-black text-slate-900">${data.val.toLocaleString()}</span><span class="text-[10px] font-bold text-slate-500">${unit}</span></div>
                     <div class="mt-3 py-1 px-3 rounded-lg inline-flex items-center gap-2" style="background: ${categoryColors[data.cat]}15"><span class="w-1.5 h-1.5 rounded-full" style="background:${categoryColors[data.cat]}"></span><span class="text-[8px] font-black uppercase" style="color:${categoryColors[data.cat]}">${data.cat}</span></div>
                 </div>`).join('');
@@ -180,47 +168,31 @@
                                 <button onclick="deleteInitiative('${item.id}')" class="text-[10px] bg-slate-50 p-1 rounded hover:bg-red-100">🗑️</button>
                             </div>
                         </div>
-                        <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1">
-                            <span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione || '...'}
-                        </div>
+                        <div class="font-serif text-[10px] text-slate-400 leading-tight mt-1"><span class="font-sans font-black text-slate-500 mr-1">${formatDate(item.data_evento)}</span> — ${item.descrizione}</div>
                     </td>
-                    <td class="p-4 text-center">
-                        <div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white min-w-[130px]" style="background:${categoryColors[item.categoria]}; uppercase">${item.categoria}</div>
-                    </td>
+                    <td class="p-4 text-center"><div class="inline-block px-3 py-1.5 rounded-lg text-[9px] font-black text-white min-w-[130px]" style="background:${categoryColors[item.categoria]};">${item.categoria.toUpperCase()}</div></td>
                     <td class="p-4 text-center font-bold text-[9px] text-slate-500 uppercase">${item.frequenza}</td>
-                    <td class="p-4 text-right">
-                        <div class="text-xs font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div>
-                        <div class="mt-1">${getExpiryStatus(item, initiatives)}</div>
-                    </td>
+                    <td class="p-4 text-right"><div class="text-xs font-black text-slate-800">${item.kpi_valore} ${item.kpi_unita}</div><div class="mt-1">${getExpiryStatus(item, initiatives)}</div></td>
                 </tr>`).join('');
 
-            // Footer Dinamico
-            const sorted = initiatives.filter(i => i.last_updated).sort((a,b) => b.last_updated?.seconds - a.last_updated?.seconds);
-            if (sorted.length > 0) {
-                const last = sorted[0].last_updated.toDate();
-                document.getElementById('footer-info').innerHTML = `ULTIMO AGGIORNAMENTO: <b>${last.toLocaleDateString()} ${last.toLocaleTimeString()}</b> | OPERATORE: <b>${sorted[0].autore.toUpperCase()}</b>`;
+            // Footer Info
+            if (initiatives.length > 0) {
+                const last = new Date(initiatives[0].last_updated);
+                document.getElementById('footer-info').innerHTML = `ULTIMA MODIFICA SESSIONE: <b>${last.toLocaleDateString()} ${last.toLocaleTimeString()}</b> | OPERATORE: <b>${initiatives[0].autore.toUpperCase()}</b>`;
             }
 
             renderDoughnut();
             renderComparisonChart();
         }
 
-        // --- CHARTS ---
+        // --- GRAFICI (STESSA LOGICA PRECEDENTE) ---
         function renderComparisonChart() {
             const nameCounts = initiatives.reduce((acc, curr) => { acc[curr.nome_iniziativa] = (acc[curr.nome_iniziativa] || 0) + 1; return acc; }, {});
             const repeated = initiatives.filter(i => nameCounts[i.nome_iniziativa] > 1);
-            const groups = repeated.reduce((acc, curr) => { 
-                const u = curr.kpi_unita.toUpperCase(); 
-                if (!acc[u]) acc[u] = []; 
-                acc[u].push(curr); 
-                return acc; 
-            }, {});
+            const groups = repeated.reduce((acc, curr) => { const u = curr.kpi_unita.toUpperCase(); if (!acc[u]) acc[u] = []; acc[u].push(curr); return acc; }, {});
             const units = Object.keys(groups);
             const container = document.getElementById('chart-bar-container');
-            if (units.length === 0) {
-                container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10">Inserisci rinnovi per attivare il trend storico.</div>`;
-                return;
-            }
+            if (units.length === 0) { container.innerHTML = `<div class="flex items-center justify-center h-full text-[9px] text-slate-400 font-bold uppercase text-center p-10">Inserisci rinnovi per il trend.</div>`; return; }
             container.innerHTML = `<canvas id="chart-comparison"></canvas>`;
             const activeUnit = units[currentUnitIndex % units.length];
             const dataSet = groups[activeUnit].sort((a,b) => new Date(a.data_evento) - new Date(b.data_evento));
@@ -246,21 +218,18 @@
             });
         }
 
-        window.handleLogin = async (e) => {
+        window.handleLogin = (e) => {
             e.preventDefault();
             userProfile = { name: document.getElementById('login-name').value };
-            localStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
-            await signInAnonymously(auth);
+            sessionStorage.setItem('csr_user_profile', JSON.stringify(userProfile));
             location.reload();
         };
 
         window.onload = () => {
+            Chart.register(ChartDataLabels);
             if(userProfile) {
                 document.getElementById('main-dashboard').classList.remove('hidden');
-                onSnapshot(query(collection(db, 'iniziative'), orderBy('timestamp', 'desc')), (snap) => {
-                    initiatives = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    updateUI();
-                });
+                updateUI();
             } else {
                 document.getElementById('login-screen').classList.remove('hidden');
             }
@@ -275,13 +244,13 @@
         @media print { .no-export { display: none !important; } }
     </style>
 </head>
-<body class="pb-24">
+<body class="pb-32">
 
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/10 backdrop-blur-md hidden">
         <div class="bg-white p-12 rounded-[3rem] shadow-2xl w-96 text-center">
-            <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB</h2>
+            <h2 class="text-2xl font-black mb-8 tracking-tighter">CSR HUB DEMO</h2>
             <form onsubmit="handleLogin(event)" class="space-y-4">
-                <input type="text" id="login-name" placeholder="Nome Operatore" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none focus:ring-2 focus:ring-slate-200">
+                <input type="text" id="login-name" placeholder="Inserisci Nome" required class="w-full bg-slate-50 border-none p-4 rounded-2xl text-center font-bold outline-none">
                 <button type="submit" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl">Entra</button>
             </form>
         </div>
@@ -292,21 +261,16 @@
             <span class="font-black text-xs tracking-[0.3em] uppercase text-slate-900">CSR Strategic Hub</span>
             <div class="flex gap-4">
                 <button onclick="downloadPDF()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Esporta PDF</button>
-                <button onclick="handleLogout()" class="bg-rose-50 text-rose-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100">Logout</button>
+                <button onclick="handleLogout()" class="bg-rose-50 text-rose-600 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-100">Esci</button>
             </div>
         </nav>
 
         <main class="max-w-6xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-12">
             <div id="report-container" class="lg:col-span-8 space-y-12">
-                
-                <section>
-                    <h3 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Indicatori di Impatto</h3>
-                    <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
-                </section>
+                <div id="impact-highlights" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
 
                 <section class="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div class="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative h-80">
-                        <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Focus Strategico</h4>
                         <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-6">
                             <span id="center-total" class="text-3xl font-black text-slate-900">0</span>
                             <span class="text-[8px] font-bold text-slate-400 uppercase">Progetti</span>
@@ -317,28 +281,23 @@
                         <div class="flex justify-between items-center no-export">
                             <h4 class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Growth Trend</h4>
                             <div class="flex gap-1">
-                                <button onclick="changeChart(-1)" class="p-1.5 bg-slate-50 rounded-lg text-xs hover:bg-slate-100 transition-colors">◀</button>
-                                <button onclick="changeChart(1)" class="p-1.5 bg-slate-50 rounded-lg text-xs hover:bg-slate-100 transition-colors">▶</button>
+                                <button onclick="changeChart(-1)" class="p-1.5 bg-slate-50 rounded-lg text-xs">◀</button>
+                                <button onclick="changeChart(1)" class="p-1.5 bg-slate-50 rounded-lg text-xs">▶</button>
                             </div>
                         </div>
-                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2 mb-2">--</h5>
+                        <h5 id="current-kpi-label" class="text-[9px] font-black text-emerald-600 uppercase mt-2">--</h5>
                         <div id="chart-bar-container" class="flex-grow"></div>
                     </div>
                 </section>
 
                 <section class="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
                     <div class="p-8 border-b border-slate-50 flex justify-between items-center">
-                        <h3 class="font-black text-xs tracking-tighter uppercase text-slate-900">Registro Attività e Scadenziario</h3>
-                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-emerald-100">Scarica CSV</button>
+                        <h3 class="font-black text-xs tracking-tighter uppercase text-slate-900">Registro Attività Sessione</h3>
+                        <button onclick="exportToExcel()" class="no-export bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest">Scarica CSV</button>
                     </div>
                     <table class="w-full text-left">
                         <thead class="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                            <tr>
-                                <th class="p-5">Iniziativa & Storytelling</th>
-                                <th class="p-5 text-center">Pilastro</th>
-                                <th class="p-5 text-center">Frequenza</th>
-                                <th class="p-5 text-right">KPI & Scadenza</th>
-                            </tr>
+                            <tr><th class="p-5">Attività</th><th class="p-5 text-center">Area</th><th class="p-5 text-center">Frequenza</th><th class="p-5 text-right">KPI</th></tr>
                         </thead>
                         <tbody id="table-body" class="divide-y divide-slate-100"></tbody>
                     </table>
@@ -347,17 +306,15 @@
 
             <aside class="lg:col-span-4 no-export">
                 <div class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 sticky top-32">
-                    <h3 id="form-title" class="font-black text-lg mb-6 tracking-tighter text-slate-800">Registra Attività</h3>
-                    <form id="initiative-form" onsubmit="saveInitiative(event)" class="space-y-4">
-                        <input type="text" id="nome_iniziativa" placeholder="Nome Attività" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
+                    <h3 id="form-title" class="font-black text-lg mb-6 tracking-tighter text-slate-800">Registra Demo</h3>
+                    <form onsubmit="saveInitiative(event)" class="space-y-4">
+                        <input type="text" id="nome_iniziativa" placeholder="Nome" required class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
                         <select id="categoria" class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold outline-none">
-                            <option>Comunità e Ambiente</option>
-                            <option>Educazione e Giovani</option>
-                            <option>Salute e Inclusione</option>
+                            <option>Comunità e Ambiente</option><option>Educazione e Giovani</option><option>Salute e Inclusione</option>
                         </select>
-                        <textarea id="descrizione" placeholder="Narrazione impatto..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none"></textarea>
+                        <textarea id="descrizione" placeholder="Descrizione..." class="w-full p-4 bg-slate-50 rounded-2xl text-sm font-serif h-24 outline-none"></textarea>
                         <div class="flex gap-2">
-                            <input type="number" id="kpi_valore" placeholder="Valore" required class="w-2/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
+                            <input type="number" id="kpi_valore" placeholder="Val" required class="w-2/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
                             <input type="text" id="kpi_unita" placeholder="Unità" required class="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold">
                         </div>
                         <div class="grid grid-cols-2 gap-2">
@@ -368,18 +325,26 @@
                         </div>
                         <div class="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
                             <input type="checkbox" id="alert_attivo" class="w-4 h-4 accent-amber-600">
-                            <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Pianifica Rinnovo</label>
+                            <label class="text-[9px] font-black text-amber-800 uppercase tracking-widest">Pianifica Alert</label>
                         </div>
-                        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest transition-all hover:opacity-90">Salva</button>
+                        <button type="submit" id="submit-btn" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-lg transition-all">Salva</button>
                     </form>
                 </div>
             </aside>
         </main>
     </div>
 
-    <footer class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 px-8 py-4 text-[8px] text-slate-400 flex justify-between items-center z-50 no-export">
-        <span id="footer-info" class="font-bold uppercase tracking-widest">Database Sincronizzato...</span>
-        <span class="font-black text-slate-800 uppercase tracking-widest">2026 Alessio Contemi. Proprietà Intellettuale Riservata. Demo Mode: i dati inseriti sono elaborati in tempo reale e non vengono memorizzati (Session-only)</span>
+    <footer class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-100 z-50 no-export">
+        <div class="px-8 py-4 flex flex-col gap-2">
+            <div class="flex justify-between items-center text-[8px] text-slate-400">
+                <span id="footer-info" class="font-bold uppercase tracking-widest">Dati gestiti localmente per la sessione</span>
+                <span class="font-black text-slate-800 uppercase tracking-widest">CSR Strategic Hub © 2026</span>
+            </div>
+            <div class="text-[8px] text-center font-black text-slate-400 border-t border-slate-50 pt-2 tracking-widest leading-relaxed">
+                2026 ALESSIO CONTEMI. PROPRIETÀ INTELLETTUALE RISERVATA. <br class="sm:hidden">
+                <span class="text-emerald-600">DEMO MODE: I DATI INSERITI SONO ELABORATI IN TEMPO REALE E NON VENGONO MEMORIZZATI (SESSION-ONLY)</span>
+            </div>
+        </div>
     </footer>
 
 </body>
